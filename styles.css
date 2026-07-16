@@ -66,8 +66,8 @@ body {
 }
 
 .title-image {
-  width: min(72vw, 760px);
-  max-height: 42vh;
+  width: min(84vw, 960px);
+  max-height: 54vh;
   object-fit: contain;
   opacity: 0;
   transform: translateY(0) scale(1);
@@ -81,7 +81,7 @@ body {
 }
 
 .title-image.is-settled {
-  transform: translateY(-8vh) scale(0.86);
+  transform: translateY(-22vh) scale(0.82);
 }
 
 .fade-overlay {
