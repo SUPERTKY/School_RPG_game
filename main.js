@@ -1,0 +1,45 @@
+const openingDelayMs = 1000;
+const fadeStartDelayMs = 3000;
+const fadeDurationMs = 1000;
+
+const opening = document.querySelector("#opening");
+const openingImage = document.querySelector("#openingImage");
+const openingAudio = document.querySelector("#openingAudio");
+const fadeOverlay = document.querySelector("#fadeOverlay");
+const nextScreen = document.querySelector("#nextScreen");
+
+const playOpeningAudio = () => {
+  openingAudio.currentTime = 0;
+  const playPromise = openingAudio.play();
+
+  if (playPromise !== undefined) {
+    playPromise.catch(() => {
+      const playAfterUserGesture = () => {
+        openingAudio.play();
+        document.removeEventListener("pointerdown", playAfterUserGesture);
+        document.removeEventListener("keydown", playAfterUserGesture);
+      };
+
+      document.addEventListener("pointerdown", playAfterUserGesture, { once: true });
+      document.addEventListener("keydown", playAfterUserGesture, { once: true });
+    });
+  }
+};
+
+const showNextScreen = () => {
+  opening.hidden = true;
+  nextScreen.classList.add("is-visible");
+  fadeOverlay.classList.remove("is-dark");
+};
+
+window.addEventListener("load", () => {
+  window.setTimeout(() => {
+    openingImage.classList.add("is-visible");
+    playOpeningAudio();
+
+    window.setTimeout(() => {
+      fadeOverlay.classList.add("is-dark");
+      window.setTimeout(showNextScreen, fadeDurationMs);
+    }, fadeStartDelayMs);
+  }, openingDelayMs);
+});

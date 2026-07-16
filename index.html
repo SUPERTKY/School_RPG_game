@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>School RPG Game</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+  </head>
+  <body>
+    <main id="app" class="app" aria-live="polite">
+      <section id="opening" class="opening-screen" aria-label="オープニング">
+        <img
+          id="openingImage"
+          class="opening-image"
+          src="assets/images/ui/Opening.png"
+          alt="Opening"
+        />
+      </section>
+
+      <section id="nextScreen" class="next-screen" aria-label="次の画面">
+        <h1>School RPG Game</h1>
+        <p>準備ができました。</p>
+      </section>
+
+      <div id="fadeOverlay" class="fade-overlay" aria-hidden="true"></div>
+    </main>
+
+    <audio id="openingAudio" src="assets/audio/Opening.mp3" preload="auto"></audio>
+  </body>
+</html>
