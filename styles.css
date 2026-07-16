@@ -16,6 +16,10 @@ body {
   overflow: hidden;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app {
   position: relative;
   width: 100vw;
@@ -34,7 +38,7 @@ body {
   display: grid;
   place-items: center;
   background: #000;
-  z-index: 1;
+  z-index: 0;
 }
 
 .opening-image {
@@ -52,13 +56,12 @@ body {
 .next-screen {
   background: #000 url("assets/images/ui/battle_bg.png") center / cover no-repeat;
   opacity: 0;
-  z-index: 0;
+  z-index: 1;
 }
 
 .next-screen.is-visible {
   opacity: 1;
 }
-
 
 .fade-overlay {
   pointer-events: none;
@@ -67,7 +70,6 @@ body {
   transition: opacity 1s ease;
   z-index: 2;
 }
-
 .fade-overlay.is-dark {
   opacity: 1;
 }
