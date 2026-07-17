@@ -180,7 +180,7 @@ body {
 
 .battle-character {
   position: absolute;
-  top: 57%;
+  top: 52%;
   width: min(30vw, 320px);
   max-height: 44vh;
   object-fit: contain;
