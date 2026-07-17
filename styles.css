@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+@font-face {
+  font-family: "Noto Sans JP Guard";
+  font-style: normal;
+  font-weight: 500;
+  src: url("fonts/NotoSansJP-Medium.ttf") format("truetype");
+}
+
 html,
 body {
   width: 100%;
@@ -307,10 +314,91 @@ body {
 .battle-character {
   position: absolute;
   top: 52%;
+  --damage-brightness: 1.15;
+  --damage-shake: 4px;
+  --damage-duration: 260ms;
   width: min(30vw, 320px);
   max-height: 44vh;
   object-fit: contain;
   transform: translateY(-50%);
+}
+
+.battle-character.is-taking-damage {
+  animation: character-damage-shake var(--damage-duration) ease-in-out;
+}
+
+.battle-character.is-recovering {
+  animation: character-recover-flash 300ms ease-out;
+}
+
+.battle-character[data-damage-stage="small"] {
+  --damage-brightness: 1.12;
+  --damage-shake: 4px;
+  --damage-duration: 250ms;
+}
+
+.battle-character[data-damage-stage="medium"] {
+  --damage-brightness: 1.2;
+  --damage-shake: 7px;
+  --damage-duration: 320ms;
+}
+
+.battle-character[data-damage-stage="large"] {
+  --damage-brightness: 1.28;
+  --damage-shake: 11px;
+  --damage-duration: 400ms;
+}
+
+.battle-character[data-damage-stage="huge"] {
+  --damage-brightness: 1.35;
+  --damage-shake: 15px;
+  --damage-duration: 400ms;
+}
+
+@keyframes character-damage-shake {
+  0%,
+  100% {
+    filter: none;
+    transform: translate(0, -50%);
+  }
+
+  12%,
+  36%,
+  60% {
+    filter:
+      sepia(1)
+      saturate(6)
+      hue-rotate(315deg)
+      brightness(var(--damage-brightness));
+    transform: translate(calc(var(--damage-shake) * -1), -50%);
+  }
+
+  24%,
+  48%,
+  72% {
+    filter:
+      sepia(1)
+      saturate(6)
+      hue-rotate(315deg)
+      brightness(var(--damage-brightness));
+    transform: translate(var(--damage-shake), -50%);
+  }
+}
+
+@keyframes character-recover-flash {
+  0%,
+  100% {
+    filter: none;
+  }
+
+  45% {
+    filter:
+      drop-shadow(0 0 18px rgba(84, 255, 118, 0.95))
+      sepia(1)
+      saturate(8)
+      hue-rotate(55deg)
+      brightness(1.35);
+  }
 }
 
 .battle-character--player {
@@ -319,6 +407,52 @@ body {
 
 .battle-character--opponent {
   right: 10%;
+}
+
+.guard-overlay {
+  position: absolute;
+  top: 52%;
+  left: 10%;
+  width: min(30vw, 320px);
+  max-height: 44vh;
+  aspect-ratio: 1 / 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 180ms ease;
+}
+
+.guard-overlay.is-active {
+  opacity: 1;
+}
+
+.guard-overlay__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 14px rgba(28, 74, 126, 0.45));
+}
+
+.guard-overlay__value {
+  position: absolute;
+  left: 50%;
+  bottom: 9%;
+  min-width: 3.8em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(13, 31, 67, 0.76);
+  color: #ffffff;
+  font-family: "Noto Sans JP Guard", system-ui, sans-serif;
+  font-size: clamp(1.1rem, 2.6vw, 2rem);
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.8),
+    0 0 8px rgba(86, 205, 255, 0.95);
+  transform: translateX(-50%);
 }
 
 .battle-actions {
