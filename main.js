@@ -109,8 +109,8 @@ const setBattleMessage = (message) => {
 const updateHpDisplay = () => {
   playerHpText.textContent = `${battleState.playerHp} / ${maxHp}`;
   opponentHpText.textContent = `${battleState.opponentHp} / ${maxHp}`;
-  playerHpGauge.style.transform = `scaleX(${battleState.playerHp / maxHp})`;
-  opponentHpGauge.style.transform = `scaleX(${battleState.opponentHp / maxHp})`;
+  playerHpGauge.style.setProperty("--hp-cut", `${(1 - battleState.playerHp / maxHp) * 100}%`);
+  opponentHpGauge.style.setProperty("--hp-cut", `${(1 - battleState.opponentHp / maxHp) * 100}%`);
 };
 
 const updateSkillButtons = () => {

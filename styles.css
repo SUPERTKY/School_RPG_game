@@ -148,67 +148,96 @@ body {
 
 .battle-hud {
   position: absolute;
-  top: clamp(14px, 3vh, 30px);
-  left: 50%;
+  top: 26px;
+  left: 0;
+  right: 0;
   z-index: 1;
-  width: min(94vw, 1180px);
   display: grid;
-  grid-template-columns: minmax(260px, 390px) minmax(170px, 1fr) minmax(260px, 390px);
-  gap: clamp(14px, 2vw, 30px);
+  grid-template-columns: 42% 16% 42%;
   align-items: start;
-  transform: translateX(-50%);
   pointer-events: none;
 }
 
-.hp-panel {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 12px;
-  align-items: center;
-  padding: 10px 14px 14px;
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 16px;
-  background: rgba(12, 20, 34, 0.78);
+.hp-display {
+  --hp-cut: 0%;
+  position: relative;
+  width: min(43vw, 620px);
+  aspect-ratio: 1921 / 819;
   color: #fff;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-weight: 900;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.45));
 }
 
-.hp-panel--player {
+.hp-display--player {
   justify-self: start;
+  margin-left: 12px;
 }
 
-.hp-panel--opponent {
+.hp-display--opponent {
   justify-self: end;
+  margin-right: 12px;
 }
 
-.hp-panel__name {
-  font-weight: 800;
+.hp-display--opponent .hp-display__art {
+  transform: scaleX(-1);
+}
+
+.hp-display__art,
+.hp-display__bar,
+.hp-display__gauge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hp-display__art {
+  overflow: hidden;
+}
+
+.hp-display__bar,
+.hp-display__gauge {
+  display: block;
+  object-fit: contain;
+}
+
+.hp-display__gauge {
+  padding: 10.8% 8.2% 31.9% 24.2%;
+  clip-path: inset(0 0 0 var(--hp-cut));
+  transition: clip-path 320ms ease;
+}
+
+.hp-display__name,
+.hp-display__value {
+  position: absolute;
+  z-index: 1;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.9);
+}
+
+.hp-display__name {
+  left: 17%;
+  bottom: 25%;
+  font-size: clamp(0.8rem, 1.4vw, 1.2rem);
   letter-spacing: 0.08em;
 }
 
-.hp-panel__value {
-  font-weight: 800;
+.hp-display__value {
+  right: 10%;
+  bottom: 25%;
+  font-size: clamp(0.8rem, 1.3vw, 1.1rem);
   font-variant-numeric: tabular-nums;
 }
 
-.hp-panel__track {
-  grid-column: 1 / -1;
-  height: 20px;
-  overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.86);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.58);
+.hp-display--opponent .hp-display__name {
+  left: auto;
+  right: 17%;
 }
 
-.hp-panel__gauge {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #35e66e, #d5ff55);
-  transform: scaleX(1);
-  transform-origin: left center;
-  transition: transform 320ms ease;
+.hp-display--opponent .hp-display__value {
+  right: auto;
+  left: 10%;
 }
 
 .turn-panel {
