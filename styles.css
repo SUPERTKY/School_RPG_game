@@ -783,3 +783,86 @@ img {
   cursor: wait;
   opacity: 0.72;
 }
+
+.matching-button.is-disabled {
+  filter: grayscale(1) brightness(0.55);
+}
+
+.admin-screen {
+  background:
+    linear-gradient(rgba(8, 11, 20, 0.28), rgba(8, 11, 20, 0.44)),
+    url("assets/images/ui/admin_bg.png") center / cover no-repeat;
+}
+
+.admin-screen__panel {
+  width: min(92vw, 720px);
+  border-color: rgba(255, 232, 168, 0.72);
+  background: rgba(24, 20, 18, 0.84);
+  backdrop-filter: blur(2px);
+}
+
+.admin-screen__form {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-screen__subjects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 18px;
+  border: 2px solid rgba(255, 232, 168, 0.52);
+  border-radius: 18px;
+}
+
+.admin-screen__subjects legend {
+  padding: 0 10px;
+  font-weight: 900;
+}
+
+.admin-screen__subjects label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-screen__status {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.42);
+  font-weight: 900;
+}
+
+.admin-screen__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.admin-screen__host,
+.admin-screen__stop {
+  min-width: 150px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #17130a;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-screen__host {
+  background: #72e37d;
+}
+
+.admin-screen__stop {
+  background: #ff9b9b;
+}
