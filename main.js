@@ -148,6 +148,7 @@ const battleState = {
   lastMatchVersion: -1,
   matchSyncTimerId: null,
   matchingTimerId: null,
+  rouletteRunId: 0,
   eliminatedTournamentId: Number(localStorage.getItem("schoolRpgEliminatedTournamentId") || "-1"),
   questions: [],
   questionSession: null,
@@ -360,6 +361,30 @@ const postSessionAction = async (payload) => {
   return result;
 };
 
+const notifyPlayerDisconnected = () => {
+  if (!["matching", "roulette", "player", "opponent", "question", "resolving"].includes(battleState.phase)) {
+    return;
+  }
+
+  const payload = JSON.stringify({
+    action: "leaveMatch",
+    playerId: battleState.playerId,
+    matchId: battleState.match?.id,
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(sessionEndpoint, new Blob([payload], { type: "application/json" }));
+    return;
+  }
+
+  fetch(sessionEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    keepalive: true,
+  }).catch(() => {});
+};
+
 const hideAnswerIcon = () => {
   if (!answerFeedbackIcon) return;
   if (answerIconTimerId) {
@@ -427,23 +452,31 @@ const showResult = async (result) => {
 };
 
 const playTurnRoulette = async (firstIsPlayer) => {
+  const rouletteRunId = battleState.rouletteRunId + 1;
+  battleState.rouletteRunId = rouletteRunId;
   turnLabel.classList.add("is-hidden-before-start");
   turnRoulette.classList.add("is-playing");
   const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
   const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
-  const rouletteImages = firstIsPlayer ? [enemyTurnImage, yourTurnImage] : [yourTurnImage, enemyTurnImage];
-  let index = 0;
-  turnRouletteImage.src = rouletteImages[index];
-  const timerId = window.setInterval(() => {
-    index += 1;
-    turnRouletteImage.src = rouletteImages[index % rouletteImages.length];
-  }, 120);
-  await new Promise((resolve) => window.setTimeout(resolve, 2160));
-  window.clearInterval(timerId);
-  turnRouletteImage.src = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+  const rouletteImages = [yourTurnImage, enemyTurnImage];
+  const finalImage = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+
+  for (let step = 0; step < 18; step += 1) {
+    if (battleState.rouletteRunId !== rouletteRunId) {
+      return false;
+    }
+    turnRouletteImage.src = rouletteImages[step % rouletteImages.length];
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+  }
+
+  if (battleState.rouletteRunId !== rouletteRunId) {
+    return false;
+  }
+  turnRouletteImage.src = finalImage;
   await new Promise((resolve) => window.setTimeout(resolve, 650));
   turnRoulette.classList.remove("is-playing");
   turnLabel.classList.remove("is-hidden-before-start");
+  return true;
 };
 
 const loadQuestions = async () => {
@@ -723,8 +756,13 @@ const applyRemoteMatch = (match) => {
   }
   const opponentId = match.playerIds.find((id) => id !== battleState.playerId);
   const previousVersion = battleState.lastMatchVersion;
+  const incomingVersion = Number.isInteger(match.version) ? match.version : previousVersion;
+  if (incomingVersion < previousVersion) {
+    return;
+  }
+
   battleState.match = match;
-  battleState.lastMatchVersion = Number.isInteger(match.version) ? match.version : previousVersion;
+  battleState.lastMatchVersion = incomingVersion;
   battleState.playerHp = match.hpByPlayerId?.[battleState.playerId] ?? battleState.playerHp;
   battleState.opponentHp = match.hpByPlayerId?.[opponentId] ?? battleState.opponentHp;
   battleState.playerGuardReduction = match.guardByPlayerId?.[battleState.playerId] ?? 0;
@@ -751,6 +789,10 @@ const applyRemoteMatch = (match) => {
 
   if (match.finished) {
     stopMatchSync();
+    if (match.disconnectReason) {
+      forceReturnToTitle("接続が切れたため、バトルを終了しました。もう一度マッチングしてください。");
+      return;
+    }
     showResult(match.winnerPlayerId === battleState.playerId ? "win" : "lose");
     return;
   }
@@ -773,6 +815,8 @@ const syncMatch = async () => {
     applyRemoteSession(session);
     if (session.match) {
       applyRemoteMatch(session.match);
+    } else if (["missing", "disconnected"].includes(session.matchStatus)) {
+      forceReturnToTitle("接続が切れたため、バトルを終了しました。もう一度マッチングしてください。");
     }
   } catch (error) {
     setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
@@ -894,6 +938,9 @@ const resetBattle = () => {
   battleState.questionSession = null;
   battleState.match = null;
   battleState.lastMatchVersion = -1;
+  battleState.rouletteRunId += 1;
+  turnRoulette.classList.remove("is-playing");
+  turnLabel.classList.remove("is-hidden-before-start");
   questionPanel.hidden = true;
   updateHpDisplay();
   updateGuardOverlay();
@@ -914,16 +961,24 @@ const hydrateRemoteMatch = (match) => {
 };
 
 const beginMatchedBattle = async (match) => {
+  if (!["idle", "matching"].includes(battleState.phase)) {
+    return;
+  }
+
   hydrateRemoteMatch(match);
   if (battleState.matchingTimerId) {
     window.clearInterval(battleState.matchingTimerId);
     battleState.matchingTimerId = null;
   }
+  battleState.phase = "roulette";
   setBattleMessage("マッチングしました！ 先攻・後攻を決めています。");
   await loadQuestions();
   battleScene.classList.add("is-visible");
   const firstIsPlayer = match.firstPlayerId === battleState.playerId;
-  await playTurnRoulette(firstIsPlayer);
+  const rouletteCompleted = await playTurnRoulette(firstIsPlayer);
+  if (!rouletteCompleted || battleState.phase !== "roulette") {
+    return;
+  }
   if (firstIsPlayer) {
     startPlayerTurn();
   } else {
@@ -933,8 +988,16 @@ const beginMatchedBattle = async (match) => {
 };
 
 const pollMatching = async () => {
+  if (!["idle", "matching"].includes(battleState.phase)) {
+    return;
+  }
+
+  battleState.phase = "matching";
   try {
     const session = await postSessionAction({ action: "joinMatch", playerId: battleState.playerId });
+    if (battleState.phase !== "matching") {
+      return;
+    }
     applyRemoteSession(session);
     if (session.matchStatus === "eliminated") {
       forceReturnToTitle("一回負けたため、次の大会までマッチングできません。");
@@ -945,11 +1008,16 @@ const pollMatching = async () => {
       return;
     }
     if (session.matchStatus === "matched" && session.match) {
+      if (battleState.matchingTimerId) {
+        window.clearInterval(battleState.matchingTimerId);
+        battleState.matchingTimerId = null;
+      }
       await beginMatchedBattle(session.match);
       return;
     }
     setBattleMessage("相手を探しています。同じタイミングで探している人とランダムにマッチングします。");
   } catch (error) {
+    battleState.phase = "idle";
     setBattleMessage("マッチング状態の確認に失敗しました。通信を確認してください。");
   }
 };
@@ -978,7 +1046,7 @@ const startBattleScene = async () => {
   resetBattle();
   setBattleMessage("相手を探しています...");
   await pollMatching();
-  if (!battleState.matchingTimerId && battleState.phase === "idle") {
+  if (!battleState.matchingTimerId && battleState.phase === "matching") {
     battleState.matchingTimerId = window.setInterval(pollMatching, matchingPollMs);
   }
 };
@@ -1102,6 +1170,8 @@ battleActions.addEventListener("click", (event) => {
 
   useSkill(button.dataset.skill);
 });
+
+window.addEventListener("pagehide", notifyPlayerDisconnected);
 
 window.addEventListener("load", async () => {
   await loadRemoteSession();

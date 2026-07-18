@@ -1,5 +1,7 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
+const waitingPlayerTimeoutMs = 10000;
+const matchPlayerTimeoutMs = 45000;
 
 const defaultSession = {
   hosted: false,
@@ -32,7 +34,16 @@ const normalizeSession = (session) => ({
   round: Number.isInteger(session?.round) ? session.round : 0,
   closingRound: session?.closingRound === true,
   eliminatedPlayerIds: Array.isArray(session?.eliminatedPlayerIds) ? session.eliminatedPlayerIds.filter(Boolean) : [],
-  waitingPlayers: Array.isArray(session?.waitingPlayers) ? session.waitingPlayers.filter((player) => player?.id) : [],
+  waitingPlayers: Array.isArray(session?.waitingPlayers)
+    ? session.waitingPlayers
+        .filter((player) => player?.id)
+        .map((player) => ({
+          id: String(player.id),
+          joinedAt: Number.isFinite(player.joinedAt) ? player.joinedAt : 0,
+          tournamentId: Number.isInteger(player.tournamentId) ? player.tournamentId : session?.tournamentId,
+          round: Number.isInteger(player.round) ? player.round : session?.round,
+        }))
+    : [],
   matches: session?.matches && typeof session.matches === "object" ? session.matches : {},
 });
 
@@ -61,10 +72,62 @@ const maxHp = 120;
 
 const randomId = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
+const isCurrentRoundPlayer = (session, player) =>
+  player?.id && player.tournamentId === session.tournamentId && player.round === session.round;
+
+const isCurrentRoundMatch = (session, match) =>
+  match &&
+  match.tournamentId === session.tournamentId &&
+  match.round === session.round &&
+  match.finished !== true;
+
+const pruneCurrentRoundWaitingPlayers = (session, playerIdToExclude = "", now = Date.now()) => {
+  const uniquePlayers = new Map();
+  session.waitingPlayers
+    .filter(
+      (player) =>
+        isCurrentRoundPlayer(session, player) &&
+        player.id !== playerIdToExclude &&
+        now - player.joinedAt <= waitingPlayerTimeoutMs,
+    )
+    .forEach((player) => uniquePlayers.set(player.id, player));
+  session.waitingPlayers = Array.from(uniquePlayers.values());
+};
+
+const touchMatchPlayer = (match, playerId, now = Date.now()) => {
+  match.lastSeenByPlayerId ??= {};
+  match.lastSeenByPlayerId[playerId] = now;
+};
+
+const cancelMatchForDisconnect = (match, disconnectedPlayerId, now = Date.now()) => {
+  if (!match || match.finished) {
+    return match;
+  }
+
+  match.finished = true;
+  match.winnerPlayerId = null;
+  match.loserPlayerId = null;
+  match.disconnectedPlayerId = disconnectedPlayerId;
+  match.disconnectReason = "playerDisconnected";
+  match.version = (Number.isInteger(match.version) ? match.version : 0) + 1;
+  match.updatedAt = now;
+  return match;
+};
+
+const finishMatchIfOpponentTimedOut = (session, match, playerId, now = Date.now()) => {
+  const opponentId = getOpponentId(match, playerId);
+  const opponentLastSeen = match.lastSeenByPlayerId?.[opponentId] ?? match.updatedAt ?? match.createdAt ?? now;
+  if (now - opponentLastSeen > matchPlayerTimeoutMs) {
+    cancelMatchForDisconnect(match, opponentId, now);
+  }
+  return match;
+};
+
 const createMatch = (session, playerId, opponentId) => {
   const firstPlayerId = Math.random() < 0.5 ? playerId : opponentId;
   const match = {
     id: randomId(),
+    tournamentId: session.tournamentId,
     round: session.round,
     playerIds: [playerId, opponentId],
     firstPlayerId,
@@ -82,6 +145,7 @@ const createMatch = (session, playerId, opponentId) => {
     lastAction: null,
     processedActionIds: [],
     createdAt: Date.now(),
+    lastSeenByPlayerId: { [playerId]: Date.now(), [opponentId]: Date.now() },
     updatedAt: Date.now(),
   };
   session.matches[match.id] = match;
@@ -122,18 +186,23 @@ export async function onRequestPost({ request, env }) {
 
   if (action === "joinMatch") {
     const playerId = String(payload?.playerId ?? "");
+    const now = Date.now();
+    if (!playerId) {
+      return json({ ...session, matchStatus: "missing" }, { status: 400 });
+    }
     if (!session.hosted) {
       return json({ ...session, matchStatus: "closed" });
     }
     if (session.eliminatedPlayerIds.includes(playerId)) {
       return json({ ...session, matchStatus: "eliminated" });
     }
-    const existingMatch = Object.values(session.matches).find((match) => match.playerIds?.includes(playerId) && !match.finished);
+    pruneCurrentRoundWaitingPlayers(session, playerId, now);
+    const existingMatch = Object.values(session.matches).find((match) => isCurrentRoundMatch(session, match) && match.playerIds?.includes(playerId));
     if (existingMatch) {
       return json({ ...session, matchStatus: "matched", match: existingMatch });
     }
 
-    const otherPlayers = session.waitingPlayers.filter((player) => player.id !== playerId);
+    const otherPlayers = session.waitingPlayers.filter((player) => isCurrentRoundPlayer(session, player) && player.id !== playerId);
     if (otherPlayers.length > 0) {
       const opponent = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
       session.waitingPlayers = session.waitingPlayers.filter((player) => player.id !== playerId && player.id !== opponent.id);
@@ -141,7 +210,10 @@ export async function onRequestPost({ request, env }) {
       return json({ ...(await writeSession(env, session)), matchStatus: "matched", match });
     }
 
-    session.waitingPlayers = [...session.waitingPlayers.filter((player) => player.id !== playerId), { id: playerId, joinedAt: Date.now() }];
+    session.waitingPlayers = [
+      ...session.waitingPlayers.filter((player) => isCurrentRoundPlayer(session, player) && player.id !== playerId),
+      { id: playerId, joinedAt: now, tournamentId: session.tournamentId, round: session.round },
+    ];
     return json({ ...(await writeSession(env, session)), matchStatus: "waiting" });
   }
 
@@ -149,8 +221,26 @@ export async function onRequestPost({ request, env }) {
   if (action === "getMatch") {
     const playerId = String(payload?.playerId ?? "");
     const matchId = String(payload?.matchId ?? "");
-    const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => item.playerIds?.includes(playerId) && !item.finished);
-    return json({ ...session, matchStatus: match ? "matched" : "missing", match });
+    const now = Date.now();
+    const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => isCurrentRoundMatch(session, item) && item.playerIds?.includes(playerId));
+    if (!match || !match.playerIds?.includes(playerId)) {
+      return json({ ...session, matchStatus: "missing" });
+    }
+
+    touchMatchPlayer(match, playerId, now);
+    finishMatchIfOpponentTimedOut(session, match, playerId, now);
+    return json({ ...(await writeSession(env, session)), matchStatus: match.disconnectReason ? "disconnected" : match.finished ? "finished" : "matched", match });
+  }
+
+  if (action === "leaveMatch") {
+    const playerId = String(payload?.playerId ?? "");
+    const matchId = String(payload?.matchId ?? "");
+    session.waitingPlayers = session.waitingPlayers.filter((player) => player.id !== playerId);
+    const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => isCurrentRoundMatch(session, item) && item.playerIds?.includes(playerId));
+    if (match?.playerIds?.includes(playerId)) {
+      cancelMatchForDisconnect(match, playerId);
+    }
+    return json(await writeSession(env, session));
   }
 
   if (action === "submitSkill") {
@@ -167,6 +257,8 @@ export async function onRequestPost({ request, env }) {
     if (match.finished) {
       return json({ ...session, matchStatus: "finished", match });
     }
+    const now = Date.now();
+    touchMatchPlayer(match, playerId, now);
     if (Number.isInteger(payload?.expectedVersion) && payload.expectedVersion !== match.version) {
       return json({ ...session, matchStatus: "versionMismatch", match }, { status: 409 });
     }
@@ -228,7 +320,7 @@ export async function onRequestPost({ request, env }) {
     }
     match.version += 1;
     match.updatedAt = Date.now();
-    return json({ ...(await writeSession(env, session)), matchStatus: match.finished ? "finished" : "matched", match });
+    return json({ ...(await writeSession(env, session)), matchStatus: match.disconnectReason ? "disconnected" : match.finished ? "finished" : "matched", match });
   }
 
   if (action === "finishMatch") {
