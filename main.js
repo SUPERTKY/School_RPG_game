@@ -776,6 +776,66 @@ adminStopButton.addEventListener("click", async () => {
   }
 });
 
+adminGameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(adminGameForm);
+  const nextSubjectKey = String(formData.get("subject") ?? "math");
+  battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
+  adminHostButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催状態を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: true, selectedSubjectKey: battleState.selectedSubjectKey });
+    await loadQuestions();
+  } catch (error) {
+    adminStatus.textContent = "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminHostButton.disabled = false;
+  }
+});
+
+adminStopButton.addEventListener("click", async () => {
+  adminStopButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催終了を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
+  } catch (error) {
+    adminStatus.textContent = "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminStopButton.disabled = false;
+  }
+});
+
+adminStopButton.addEventListener("click", async () => {
+  adminStopButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催終了を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
+  } catch (error) {
+    adminStatus.textContent = "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminStopButton.disabled = false;
+  }
+});
+
+adminGameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(adminGameForm);
+  const nextSubjectKey = String(formData.get("subject") ?? "math");
+  battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
+  battleState.hosted = true;
+  adminHostButton.disabled = true;
+  await loadQuestions();
+  saveGameSession();
+  updateSessionUi();
+  adminHostButton.disabled = false;
+});
+
+adminStopButton.addEventListener("click", () => {
+  battleState.hosted = false;
+  saveGameSession();
+  updateSessionUi();
+});
+
 adminBackButton.addEventListener("click", () => {
   adminScreen.hidden = true;
   if (!nextScreen.classList.contains("is-battle-starting")) {
