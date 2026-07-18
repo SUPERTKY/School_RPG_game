@@ -45,6 +45,7 @@ const fadeOverlay = document.querySelector("#fadeOverlay");
 const nextScreen = document.querySelector("#nextScreen");
 const titleImage = document.querySelector("#titleImage");
 const matchingButton = document.querySelector("#matchingButton");
+const sessionNotice = document.querySelector("#sessionNotice");
 const adminButton = document.querySelector("#adminButton");
 const adminScreen = document.querySelector("#adminScreen");
 const adminBackButton = document.querySelector("#adminBackButton");
@@ -252,8 +253,13 @@ const updateSessionUi = () => {
 
   subjectLabel.textContent = `教科: ${subject.label}`;
   matchingButton.disabled = !battleState.hosted;
-  matchingButton.title = battleState.hosted ? `${subject.label}でマッチング開始` : "管理者がゲームを開催するまで遊べません";
-  matchingButton.classList.toggle("is-disabled", !battleState.hosted);
+  matchingButton.title = battleState.hosted ? `${subject.label}でマッチング開始` : "";
+  matchingButton.classList.toggle("is-visible", battleState.hosted && titleImage.classList.contains("is-settled"));
+  if (sessionNotice) {
+    sessionNotice.hidden = battleState.hosted;
+    sessionNotice.textContent = "現在開催していません。管理者が開催するまで遊べません。";
+    sessionNotice.classList.toggle("is-visible", !battleState.hosted && titleImage.classList.contains("is-settled"));
+  }
   if (adminStatus) {
     adminStatus.textContent = statusText;
   }
@@ -698,7 +704,7 @@ const showNextScreen = () => {
       titleImage.classList.add("is-settled");
 
       window.setTimeout(() => {
-        matchingButton.classList.add("is-visible");
+        updateSessionUi();
         adminButton.classList.add("is-visible");
       }, titleMoveDurationMs);
     }, titleFadeDurationMs + titleMoveDelayMs);
@@ -713,6 +719,7 @@ adminButton.addEventListener("click", async () => {
     adminScreen.hidden = false;
     adminButton.classList.remove("is-visible");
     matchingButton.classList.remove("is-visible");
+    sessionNotice?.classList.remove("is-visible");
   }
 });
 
@@ -739,7 +746,7 @@ adminBackButton.addEventListener("click", () => {
   adminScreen.hidden = true;
   if (!nextScreen.classList.contains("is-battle-starting")) {
     adminButton.classList.add("is-visible");
-    matchingButton.classList.add("is-visible");
+    updateSessionUi();
   }
 });
 
