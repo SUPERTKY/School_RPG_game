@@ -426,7 +426,8 @@ const handlePost = async ({ request, env }) => {
     session.eliminatedPlayerIds = [];
     session.waitingPlayers = [];
     session.matches = {};
-    return json(await writeSession(env, session));
+    const heartbeatKeysDeleted = await deleteMatchHeartbeats(env);
+    return json({ ...(await writeSession(env, session)), heartbeatKeysDeleted });
   }
 
   if (action === "advanceRound") {
@@ -457,6 +458,8 @@ const handlePost = async ({ request, env }) => {
     nextSession.waitingPlayers = [];
     nextSession.matches = {};
     nextSession.closingRound = false;
+    const heartbeatKeysDeleted = await deleteMatchHeartbeats(env);
+    return json({ ...(await writeSession(env, nextSession)), heartbeatKeysDeleted });
   }
   return json(await writeSession(env, nextSession));
 };
