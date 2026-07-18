@@ -360,6 +360,26 @@ const postSessionAction = async (payload) => {
   return result;
 };
 
+const notifyPlayerDisconnected = () => {
+  const payload = JSON.stringify({
+    action: "leaveMatch",
+    playerId: battleState.playerId,
+    matchId: battleState.match?.id,
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(sessionEndpoint, new Blob([payload], { type: "application/json" }));
+    return;
+  }
+
+  fetch(sessionEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    keepalive: true,
+  }).catch(() => {});
+};
+
 const hideAnswerIcon = () => {
   if (!answerFeedbackIcon) return;
   if (answerIconTimerId) {
@@ -431,16 +451,15 @@ const playTurnRoulette = async (firstIsPlayer) => {
   turnRoulette.classList.add("is-playing");
   const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
   const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
-  const rouletteImages = firstIsPlayer ? [enemyTurnImage, yourTurnImage] : [yourTurnImage, enemyTurnImage];
-  let index = 0;
-  turnRouletteImage.src = rouletteImages[index];
-  const timerId = window.setInterval(() => {
-    index += 1;
-    turnRouletteImage.src = rouletteImages[index % rouletteImages.length];
-  }, 120);
-  await new Promise((resolve) => window.setTimeout(resolve, 2160));
-  window.clearInterval(timerId);
-  turnRouletteImage.src = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+  const rouletteImages = [yourTurnImage, enemyTurnImage];
+  const finalImage = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+
+  for (let step = 0; step < 18; step += 1) {
+    turnRouletteImage.src = rouletteImages[step % rouletteImages.length];
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+  }
+
+  turnRouletteImage.src = finalImage;
   await new Promise((resolve) => window.setTimeout(resolve, 650));
   turnRoulette.classList.remove("is-playing");
   turnLabel.classList.remove("is-hidden-before-start");
@@ -773,6 +792,8 @@ const syncMatch = async () => {
     applyRemoteSession(session);
     if (session.match) {
       applyRemoteMatch(session.match);
+    } else if (session.matchStatus === "missing") {
+      forceReturnToTitle("相手との接続が切れたため、バトルを終了しました。");
     }
   } catch (error) {
     setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
@@ -919,6 +940,7 @@ const beginMatchedBattle = async (match) => {
     window.clearInterval(battleState.matchingTimerId);
     battleState.matchingTimerId = null;
   }
+  battleState.phase = "roulette";
   setBattleMessage("マッチングしました！ 先攻・後攻を決めています。");
   await loadQuestions();
   battleScene.classList.add("is-visible");
@@ -933,6 +955,11 @@ const beginMatchedBattle = async (match) => {
 };
 
 const pollMatching = async () => {
+  if (!["idle", "matching"].includes(battleState.phase)) {
+    return;
+  }
+
+  battleState.phase = "matching";
   try {
     const session = await postSessionAction({ action: "joinMatch", playerId: battleState.playerId });
     applyRemoteSession(session);
@@ -945,11 +972,16 @@ const pollMatching = async () => {
       return;
     }
     if (session.matchStatus === "matched" && session.match) {
+      if (battleState.matchingTimerId) {
+        window.clearInterval(battleState.matchingTimerId);
+        battleState.matchingTimerId = null;
+      }
       await beginMatchedBattle(session.match);
       return;
     }
     setBattleMessage("相手を探しています。同じタイミングで探している人とランダムにマッチングします。");
   } catch (error) {
+    battleState.phase = "idle";
     setBattleMessage("マッチング状態の確認に失敗しました。通信を確認してください。");
   }
 };
@@ -978,7 +1010,7 @@ const startBattleScene = async () => {
   resetBattle();
   setBattleMessage("相手を探しています...");
   await pollMatching();
-  if (!battleState.matchingTimerId && battleState.phase === "idle") {
+  if (!battleState.matchingTimerId && battleState.phase === "matching") {
     battleState.matchingTimerId = window.setInterval(pollMatching, matchingPollMs);
   }
 };
@@ -1102,6 +1134,9 @@ battleActions.addEventListener("click", (event) => {
 
   useSkill(button.dataset.skill);
 });
+
+window.addEventListener("pagehide", notifyPlayerDisconnected);
+window.addEventListener("beforeunload", notifyPlayerDisconnected);
 
 window.addEventListener("load", async () => {
   await loadRemoteSession();
