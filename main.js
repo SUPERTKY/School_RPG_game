@@ -351,10 +351,13 @@ const postSessionAction = async (payload) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`セッション操作に失敗しました: ${response.status}`);
+    const error = new Error(`セッション操作に失敗しました: ${response.status}`);
+    error.result = result;
+    throw error;
   }
-  return response.json();
+  return result;
 };
 
 const hideAnswerIcon = () => {
@@ -839,6 +842,8 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
   try {
     const session = await postSessionAction({
       action: "submitSkill",
+      actionId: crypto.randomUUID(),
+      expectedVersion: battleState.match?.version,
       playerId: battleState.playerId,
       matchId: battleState.match?.id,
       skillKey,
@@ -852,6 +857,12 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
     applyRemoteSession(session);
     applyRemoteMatch(session.match);
   } catch (error) {
+    if (error.result?.match) {
+      applyRemoteSession(error.result);
+      applyRemoteMatch(error.result.match);
+      setBattleMessage(error.result.matchStatus === "versionMismatch" ? "相手との状態を更新しました。もう一度操作してください。" : "現在は自分のターンではありません。");
+      return;
+    }
     setBattleMessage("技の送信に失敗しました。もう一度同期します。");
     await syncMatch();
   }
@@ -904,7 +915,6 @@ const hydrateRemoteMatch = (match) => {
 
 const beginMatchedBattle = async (match) => {
   hydrateRemoteMatch(match);
-  startMatchSync();
   if (battleState.matchingTimerId) {
     window.clearInterval(battleState.matchingTimerId);
     battleState.matchingTimerId = null;
@@ -919,6 +929,7 @@ const beginMatchedBattle = async (match) => {
   } else {
     startOpponentTurn();
   }
+  startMatchSync();
 };
 
 const pollMatching = async () => {

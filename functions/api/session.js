@@ -80,6 +80,7 @@ const createMatch = (session, playerId, opponentId) => {
       [opponentId]: { recover: 0, guard: 0, burst: 0 },
     },
     lastAction: null,
+    processedActionIds: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -159,8 +160,15 @@ export async function onRequestPost({ request, env }) {
     if (!match || !match.playerIds?.includes(playerId)) {
       return json({ ...session, matchStatus: "missing" }, { status: 404 });
     }
+    const actionId = String(payload?.actionId ?? "");
+    if (actionId && match.processedActionIds?.includes(actionId)) {
+      return json({ ...session, matchStatus: match.finished ? "finished" : "matched", match });
+    }
     if (match.finished) {
       return json({ ...session, matchStatus: "finished", match });
+    }
+    if (Number.isInteger(payload?.expectedVersion) && payload.expectedVersion !== match.version) {
+      return json({ ...session, matchStatus: "versionMismatch", match }, { status: 409 });
     }
     if (match.turnPlayerId !== playerId) {
       return json({ ...session, matchStatus: "notYourTurn", match }, { status: 409 });
@@ -214,6 +222,9 @@ export async function onRequestPost({ request, env }) {
         match.cooldownsByPlayerId[opponentId][key] = Math.max(0, match.cooldownsByPlayerId[opponentId][key] - 1);
       });
       match.turnPlayerId = opponentId;
+    }
+    if (actionId) {
+      match.processedActionIds = [...(match.processedActionIds ?? []), actionId].slice(-40);
     }
     match.version += 1;
     match.updatedAt = Date.now();
