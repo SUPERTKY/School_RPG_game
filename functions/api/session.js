@@ -1,7 +1,7 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
 const waitingPlayerTimeoutMs = 10000;
-const matchPlayerTimeoutMs = 15000;
+const matchPlayerTimeoutMs = 45000;
 
 const defaultSession = {
   hosted: false,
@@ -259,10 +259,6 @@ export async function onRequestPost({ request, env }) {
     }
     const now = Date.now();
     touchMatchPlayer(match, playerId, now);
-    finishMatchIfOpponentTimedOut(session, match, playerId, now);
-    if (match.finished) {
-      return json({ ...(await writeSession(env, session)), matchStatus: "finished", match });
-    }
     if (Number.isInteger(payload?.expectedVersion) && payload.expectedVersion !== match.version) {
       return json({ ...session, matchStatus: "versionMismatch", match }, { status: 409 });
     }
