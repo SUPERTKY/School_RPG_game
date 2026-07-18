@@ -1,7 +1,7 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
-const waitingPlayerTimeoutMs = 10000;
-const matchPlayerTimeoutMs = 45000;
+const waitingPlayerTimeoutMs = 30000;
+const matchPlayerTimeoutMs = 120000;
 
 const defaultSession = {
   hosted: false,
