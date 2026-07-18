@@ -9,6 +9,19 @@ const maxHp = 120;
 const opponentWaitMs = 5000;
 const questionDurationSeconds = 20;
 const feedbackDurationMs = 260;
+const authEndpoint = "/api/auth";
+const passwordModes = {
+  startup: {
+    title: "パスワード認証",
+    description: "ゲームを開始するにはパスワードを入力してください。",
+    allowCancel: false,
+  },
+  admin: {
+    title: "管理者認証",
+    description: "管理者画面を開くにはパスワードを入力してください。",
+    allowCancel: true,
+  },
+};
 
 const opening = document.querySelector("#opening");
 const openingImage = document.querySelector("#openingImage");
@@ -24,6 +37,16 @@ const fadeOverlay = document.querySelector("#fadeOverlay");
 const nextScreen = document.querySelector("#nextScreen");
 const titleImage = document.querySelector("#titleImage");
 const matchingButton = document.querySelector("#matchingButton");
+const adminButton = document.querySelector("#adminButton");
+const adminScreen = document.querySelector("#adminScreen");
+const adminBackButton = document.querySelector("#adminBackButton");
+const passwordGate = document.querySelector("#passwordGate");
+const passwordForm = document.querySelector("#passwordForm");
+const passwordTitle = document.querySelector("#passwordTitle");
+const passwordDescription = document.querySelector("#passwordDescription");
+const passwordInput = document.querySelector("#passwordInput");
+const passwordError = document.querySelector("#passwordError");
+const passwordCancelButton = document.querySelector("#passwordCancelButton");
 const battleScene = document.querySelector("#battleScene");
 const battleActions = document.querySelector("#battleActions");
 const battleMessage = document.querySelector("#battleMessage");
@@ -81,6 +104,12 @@ const skills = {
   },
 };
 
+const authState = {
+  startupUnlocked: false,
+  mode: "startup",
+  pendingResolve: null,
+};
+
 const battleState = {
   phase: "idle",
   mathQuestions: [],
@@ -93,6 +122,74 @@ const battleState = {
     guard: 0,
     burst: 0,
   },
+};
+
+
+const setPasswordMode = (mode) => {
+  authState.mode = mode;
+  const modeConfig = passwordModes[mode];
+  passwordTitle.textContent = modeConfig.title;
+  passwordDescription.textContent = modeConfig.description;
+  passwordCancelButton.hidden = !modeConfig.allowCancel;
+  passwordError.textContent = "";
+  passwordInput.value = "";
+};
+
+const showPasswordGate = (mode) => {
+  setPasswordMode(mode);
+  passwordGate.hidden = false;
+  passwordInput.focus();
+
+  return new Promise((resolve) => {
+    authState.pendingResolve = resolve;
+  });
+};
+
+const closePasswordGate = (authenticated) => {
+  passwordGate.hidden = true;
+  passwordError.textContent = "";
+  if (authState.pendingResolve) {
+    authState.pendingResolve(authenticated);
+    authState.pendingResolve = null;
+  }
+};
+
+const authenticatePassword = async (password, mode) => {
+  const response = await fetch(authEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, mode }),
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const result = await response.json();
+  return result.ok === true;
+};
+
+const handlePasswordSubmit = async (event) => {
+  event.preventDefault();
+  passwordError.textContent = "";
+  const submitButton = passwordForm.querySelector(".password-gate__submit");
+  submitButton.disabled = true;
+
+  try {
+    const authenticated = await authenticatePassword(passwordInput.value, authState.mode);
+    if (!authenticated) {
+      passwordError.textContent = "パスワードが違います。";
+      passwordInput.select();
+      return;
+    }
+
+    closePasswordGate(true);
+  } catch (error) {
+    const variableName = authState.mode === "admin" ? "ADMIN_PASSWORD" : "PASSWORD";
+    passwordError.textContent = `認証に失敗しました。Cloudflare の ${variableName} 変数を確認してください。`;
+  } finally {
+    submitButton.disabled = false;
+  }
 };
 
 const playAudioFromStart = (audioElement) => {
@@ -543,12 +640,38 @@ const showNextScreen = () => {
 
       window.setTimeout(() => {
         matchingButton.classList.add("is-visible");
+        adminButton.classList.add("is-visible");
       }, titleMoveDurationMs);
     }, titleFadeDurationMs + titleMoveDelayMs);
   }, titleAppearDelayMs);
 };
 
 matchingButton.addEventListener("click", startBattleScene);
+
+adminButton.addEventListener("click", async () => {
+  const authenticated = await showPasswordGate("admin");
+  if (authenticated) {
+    adminScreen.hidden = false;
+    adminButton.classList.remove("is-visible");
+    matchingButton.classList.remove("is-visible");
+  }
+});
+
+adminBackButton.addEventListener("click", () => {
+  adminScreen.hidden = true;
+  if (!nextScreen.classList.contains("is-battle-starting")) {
+    adminButton.classList.add("is-visible");
+    matchingButton.classList.add("is-visible");
+  }
+});
+
+passwordForm.addEventListener("submit", handlePasswordSubmit);
+
+passwordCancelButton.addEventListener("click", () => {
+  if (passwordModes[authState.mode].allowCancel) {
+    closePasswordGate(false);
+  }
+});
 
 questionChoices.addEventListener("click", handleChoiceClick);
 
@@ -562,9 +685,14 @@ battleActions.addEventListener("click", (event) => {
   useSkill(button.dataset.skill);
 });
 
-window.addEventListener("load", () => {
+window.addEventListener("load", async () => {
   resetBattle();
   loadMathQuestions();
+
+  authState.startupUnlocked = await showPasswordGate("startup");
+  if (!authState.startupUnlocked) {
+    return;
+  }
 
   window.setTimeout(() => {
     openingImage.classList.add("is-visible");
