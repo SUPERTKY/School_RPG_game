@@ -67,17 +67,23 @@ const readSession = async (env) => {
   }
 };
 
-const writeSession = async (env, session) => {
+const writeSession = async (env, session, { requireStoreWrite = false } = {}) => {
   const nextSession = normalizeSession({ ...session, updatedAt: Date.now() });
   const store = getSessionStore(env);
   if (store) {
     try {
       await store.put(sessionKey, JSON.stringify(nextSession));
-    } catch {
+    } catch (error) {
+      if (requireStoreWrite) {
+        throw error;
+      }
       // Fall back to isolate memory instead of surfacing a 500 to clients during a match.
       memorySession = nextSession;
     }
   } else {
+    if (requireStoreWrite) {
+      throw new Error("GAME_SESSION_KV_NOT_CONFIGURED");
+    }
     memorySession = nextSession;
   }
   return nextSession;
@@ -429,14 +435,14 @@ const handlePost = async ({ request, env }) => {
     session.waitingPlayers = [];
     session.matches = {};
     const heartbeatKeysDeleted = await deleteMatchHeartbeats(env);
-    return json({ ...(await writeSession(env, session)), heartbeatKeysDeleted });
+    return json({ ...(await writeSession(env, session, { requireStoreWrite: true })), heartbeatKeysDeleted });
   }
 
   if (action === "advanceRound") {
     const originalTournamentId = session.tournamentId;
     const originalRound = session.round;
     session.closingRound = true;
-    await writeSession(env, session);
+    await writeSession(env, session, { requireStoreWrite: true });
     await new Promise((resolve) => setTimeout(resolve, 5000));
 
     const latestSession = await readSession(env);
@@ -448,7 +454,7 @@ const handlePost = async ({ request, env }) => {
     latestSession.closingRound = false;
     latestSession.waitingPlayers = [];
     latestSession.matches = {};
-    return json(await writeSession(env, latestSession));
+    return json(await writeSession(env, latestSession, { requireStoreWrite: true }));
   }
 
   const nextHosted = payload?.hosted === true;
@@ -469,15 +475,18 @@ const handlePost = async ({ request, env }) => {
     nextSession.matches = {};
     nextSession.closingRound = false;
     const heartbeatKeysDeleted = await deleteMatchHeartbeats(env);
-    return json({ ...(await writeSession(env, nextSession)), heartbeatKeysDeleted });
+    return json({ ...(await writeSession(env, nextSession, { requireStoreWrite: true })), heartbeatKeysDeleted });
   }
-  return json(await writeSession(env, nextSession));
+  return json(await writeSession(env, nextSession, { requireStoreWrite: true }));
 };
 
 export async function onRequestPost(context) {
   try {
     return await handlePost(context);
   } catch {
-    return json({ ...(await readSession(context?.env)), ok: false, error: "SESSION_TEMPORARILY_UNAVAILABLE" });
+    return json(
+      { ...(await readSession(context?.env)), ok: false, error: "SESSION_TEMPORARILY_UNAVAILABLE" },
+      { status: 500 },
+    );
   }
 }
