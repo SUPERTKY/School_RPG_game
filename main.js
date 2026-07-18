@@ -7,7 +7,8 @@ const titleMoveDelayMs = 1000;
 const titleMoveDurationMs = 800;
 const maxHp = 120;
 const opponentWaitMs = 5000;
-const fallbackPoint = 1;
+const questionDurationSeconds = 20;
+const feedbackDurationMs = 260;
 
 const opening = document.querySelector("#opening");
 const openingImage = document.querySelector("#openingImage");
@@ -27,6 +28,13 @@ const battleScene = document.querySelector("#battleScene");
 const battleActions = document.querySelector("#battleActions");
 const battleMessage = document.querySelector("#battleMessage");
 const turnLabel = document.querySelector("#turnLabel");
+const subjectLabel = document.querySelector("#subjectLabel");
+const questionPanel = document.querySelector("#questionPanel");
+const questionTimer = document.querySelector("#questionTimer");
+const questionScore = document.querySelector("#questionScore");
+const questionText = document.querySelector("#questionText");
+const questionChoices = document.querySelector("#questionChoices");
+const answerFeedback = document.querySelector("#answerFeedback");
 const playerHpText = document.querySelector("#playerHpText");
 const opponentHpText = document.querySelector("#opponentHpText");
 const playerHpGauge = document.querySelector("#playerHpGauge");
@@ -40,6 +48,7 @@ const skillButtons = Array.from(document.querySelectorAll(".battle-action"));
 const skills = {
   attack: {
     name: "アタック",
+    difficulty: "normal",
     base: 8,
     perPoint: 4,
     type: "damage",
@@ -47,6 +56,7 @@ const skills = {
   },
   recover: {
     name: "リカバー",
+    difficulty: "normal",
     base: 6,
     perPoint: 3,
     type: "recover",
@@ -54,6 +64,7 @@ const skills = {
   },
   guard: {
     name: "ガード",
+    difficulty: "normal",
     base: 15,
     perPoint: 7,
     type: "guard",
@@ -62,6 +73,7 @@ const skills = {
   },
   burst: {
     name: "バースト",
+    difficulty: "hard",
     base: 16,
     perPoint: 8,
     type: "damage",
@@ -71,6 +83,8 @@ const skills = {
 
 const battleState = {
   phase: "idle",
+  mathQuestions: [],
+  questionSession: null,
   playerHp: maxHp,
   opponentHp: maxHp,
   playerGuardReduction: 0,
@@ -115,6 +129,155 @@ const playOpeningAudio = () => {
 const setBattleMessage = (message) => {
   battleMessage.textContent = message;
 };
+
+const loadMathQuestions = async () => {
+  try {
+    const response = await fetch("questions/math_questions.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`問題ファイルを読み込めませんでした: ${response.status}`);
+    }
+
+    const questions = await response.json();
+    battleState.mathQuestions = Array.isArray(questions) ? questions : [];
+    if (subjectLabel) {
+      subjectLabel.textContent = "教科: 数学";
+    }
+  } catch (error) {
+    battleState.mathQuestions = [];
+    setBattleMessage("questions/math_questions.json の読み込みに失敗しました。ページを再読み込みしてください。");
+  }
+};
+
+const getQuestionsByDifficulty = (difficulty) =>
+  battleState.mathQuestions.filter((question) => question.difficulty === difficulty && question.subject === "数学");
+
+const shuffleQuestions = (questions) => {
+  const shuffled = [...questions];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+  return shuffled;
+};
+
+const updateQuestionScore = () => {
+  const session = battleState.questionSession;
+  if (!session) {
+    return;
+  }
+
+  questionScore.textContent = `正解 ${session.correct} / 誤答 ${session.wrong}`;
+};
+
+const showQuestion = () => {
+  const session = battleState.questionSession;
+  if (!session) {
+    return;
+  }
+
+  if (session.index >= session.questions.length) {
+    session.questions = shuffleQuestions(getQuestionsByDifficulty(session.difficulty));
+    session.index = 0;
+  }
+
+  const question = session.questions[session.index];
+  questionText.textContent = question.question;
+  questionChoices.innerHTML = "";
+  answerFeedback.textContent = "";
+  question.choices.forEach((choice, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "question-panel__choice";
+    button.textContent = choice;
+    button.dataset.choiceIndex = String(index);
+    questionChoices.append(button);
+  });
+  questionChoices.classList.toggle("question-panel__choices--vertical", question.choices.some((choice) => choice.length > 16));
+};
+
+const finishQuestionSession = () => {
+  const session = battleState.questionSession;
+  if (!session || session.finished) {
+    return;
+  }
+
+  session.finished = true;
+  window.clearInterval(session.timerId);
+  questionPanel.hidden = true;
+  battleState.phase = "resolving";
+  const effectivePoint = Math.max(0, session.correct - session.wrong * 0.5);
+  applySkillResult(session.skillKey, effectivePoint, session.correct, session.wrong);
+  battleState.questionSession = null;
+};
+
+const tickQuestionTimer = () => {
+  const session = battleState.questionSession;
+  if (!session) {
+    return;
+  }
+
+  const remaining = Math.max(0, Math.ceil((session.endsAt - Date.now()) / 1000));
+  questionTimer.textContent = `残り${remaining}秒`;
+  if (remaining <= 0) {
+    finishQuestionSession();
+  }
+};
+
+const startQuestionSession = (skillKey) => {
+  const skill = skills[skillKey];
+  const questions = shuffleQuestions(getQuestionsByDifficulty(skill.difficulty));
+
+  if (questions.length === 0) {
+    setBattleMessage("この技に対応する数学の問題がありません。questions/math_questions.json を確認してください。");
+    return;
+  }
+
+  battleState.phase = "question";
+  battleState.questionSession = {
+    skillKey,
+    difficulty: skill.difficulty,
+    questions,
+    index: 0,
+    correct: 0,
+    wrong: 0,
+    finished: false,
+    endsAt: Date.now() + questionDurationSeconds * 1000,
+    timerId: window.setInterval(tickQuestionTimer, 200),
+  };
+  questionPanel.hidden = false;
+  setBattleMessage(`${skill.name}の${skill.difficulty === "hard" ? "難しい" : "通常"}問題です。20秒間でできるだけ多く答えてください。`);
+  updateSkillButtons();
+  updateQuestionScore();
+  tickQuestionTimer();
+  showQuestion();
+};
+
+const handleChoiceClick = (event) => {
+  const button = event.target.closest(".question-panel__choice");
+  const session = battleState.questionSession;
+  if (!button || !session || session.finished) {
+    return;
+  }
+
+  const question = session.questions[session.index];
+  const selectedIndex = Number(button.dataset.choiceIndex);
+  const isCorrect = selectedIndex === question.answerIndex;
+  session.correct += isCorrect ? 1 : 0;
+  session.wrong += isCorrect ? 0 : 1;
+  answerFeedback.textContent = isCorrect ? "正解！" : "不正解";
+  answerFeedback.dataset.result = isCorrect ? "correct" : "wrong";
+  updateQuestionScore();
+  session.index += 1;
+  Array.from(questionChoices.children).forEach((choiceButton) => {
+    choiceButton.disabled = true;
+  });
+  window.setTimeout(() => {
+    if (battleState.questionSession === session && !session.finished) {
+      showQuestion();
+    }
+  }, feedbackDurationMs);
+};
+
 
 const updateHpDisplay = () => {
   playerHpText.textContent = `${battleState.playerHp} / ${maxHp}`;
@@ -247,26 +410,17 @@ const finishBattleIfNeeded = () => {
   return false;
 };
 
-const useSkill = (skillKey) => {
-  if (battleState.phase !== "player") {
-    return;
-  }
-
+const applySkillResult = (skillKey, effectivePoint, correct, wrong) => {
   const skill = skills[skillKey];
-  const cooldown = battleState.cooldowns[skillKey] ?? 0;
-
-  if (!skill || cooldown > 0) {
-    return;
-  }
-
-  const effectValue = Math.round(skill.base + fallbackPoint * skill.perPoint);
+  const effectValue = Math.round(skill.base + effectivePoint * skill.perPoint);
+  const scoreText = `正解${correct}・誤答${wrong}・有効得点${effectivePoint}`;
   let message = "";
   let damageTarget = null;
   let recoverAmount = 0;
 
   if (skill.type === "damage") {
     battleState.opponentHp = Math.max(0, battleState.opponentHp - effectValue);
-    message = `${skill.name}！ 問題ファイル未使用のためポイント${fallbackPoint}で、相手に${effectValue}ダメージ。`;
+    message = `${skill.name}！ ${scoreText}で、相手に${effectValue}ダメージ。`;
     damageTarget = opponentCharacter;
   }
 
@@ -274,13 +428,13 @@ const useSkill = (skillKey) => {
     const beforeHp = battleState.playerHp;
     battleState.playerHp = Math.min(maxHp, battleState.playerHp + effectValue);
     recoverAmount = battleState.playerHp - beforeHp;
-    message = `${skill.name}！ 問題ファイル未使用のためポイント${fallbackPoint}で、自分のHPを${recoverAmount}回復。`;
+    message = `${skill.name}！ ${scoreText}で、自分のHPを${recoverAmount}回復。`;
   }
 
   if (skill.type === "guard") {
     const reduction = Math.min(skill.maxReduction, effectValue);
     battleState.playerGuardReduction = reduction;
-    message = `${skill.name}！ 問題ファイル未使用のためポイント${fallbackPoint}で、次に受けるダメージを${reduction}%軽減。`;
+    message = `${skill.name}！ ${scoreText}で、次に受けるダメージを${reduction}%軽減。`;
   }
 
   if (skill.cooldownTurns > 0) {
@@ -307,6 +461,22 @@ const useSkill = (skillKey) => {
   }
 };
 
+
+const useSkill = (skillKey) => {
+  if (battleState.phase !== "player") {
+    return;
+  }
+
+  const skill = skills[skillKey];
+  const cooldown = battleState.cooldowns[skillKey] ?? 0;
+
+  if (!skill || cooldown > 0) {
+    return;
+  }
+
+  startQuestionSession(skillKey);
+};
+
 const resetBattle = () => {
   battleState.phase = "idle";
   battleState.playerHp = maxHp;
@@ -315,6 +485,8 @@ const resetBattle = () => {
   battleState.cooldowns.recover = 0;
   battleState.cooldowns.guard = 0;
   battleState.cooldowns.burst = 0;
+  battleState.questionSession = null;
+  questionPanel.hidden = true;
   updateHpDisplay();
   updateGuardOverlay();
   updateSkillButtons();
@@ -355,6 +527,8 @@ const showNextScreen = () => {
 
 matchingButton.addEventListener("click", startBattleScene);
 
+questionChoices.addEventListener("click", handleChoiceClick);
+
 battleActions.addEventListener("click", (event) => {
   const button = event.target.closest(".battle-action");
 
@@ -367,6 +541,7 @@ battleActions.addEventListener("click", (event) => {
 
 window.addEventListener("load", () => {
   resetBattle();
+  loadMathQuestions();
 
   window.setTimeout(() => {
     openingImage.classList.add("is-visible");
