@@ -289,7 +289,6 @@ const loadRemoteSession = async () => {
 
     applyRemoteSession(await response.json());
   } catch (error) {
-    battleState.hosted = false;
     updateSessionUi();
     if (sessionNotice) {
       sessionNotice.textContent = "オンラインの開催状態を確認できません。管理者に確認してください。";
@@ -762,6 +761,18 @@ adminGameForm.addEventListener("submit", async (event) => {
     adminStatus.textContent = "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
   } finally {
     adminHostButton.disabled = false;
+  }
+});
+
+adminStopButton.addEventListener("click", async () => {
+  adminStopButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催終了を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
+  } catch (error) {
+    adminStatus.textContent = "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminStopButton.disabled = false;
   }
 });
 
