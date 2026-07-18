@@ -28,14 +28,30 @@
         <button id="matchingButton" class="matching-button" type="button" aria-label="マッチング開始">
           <img src="assets/images/ui/Matching_Button.png" alt="マッチング" />
         </button>
+        <p id="sessionNotice" class="session-notice" hidden>現在開催していません。管理者が開催するまで遊べません。</p>
         <button id="adminButton" class="admin-button" type="button" aria-label="管理者画面を開く">
           <img src="assets/images/ui/Administrator.png" alt="管理者" />
         </button>
         <section id="adminScreen" class="admin-screen" aria-label="管理者画面" hidden>
           <div class="admin-screen__panel">
             <h1>管理者画面</h1>
-            <p>管理者機能はまだ準備中です。</p>
-            <button id="adminBackButton" class="admin-screen__back" type="button">タイトルへ戻る</button>
+            <p>開催する教科を選ぶと、タイトルのマッチングから遊べるようになります。</p>
+            <form id="adminGameForm" class="admin-screen__form">
+              <fieldset class="admin-screen__subjects">
+                <legend>開催する教科</legend>
+                <label><input type="radio" name="subject" value="math" checked /> 数学</label>
+                <label><input type="radio" name="subject" value="japanese" /> 国語</label>
+                <label><input type="radio" name="subject" value="english" /> 英語</label>
+                <label><input type="radio" name="subject" value="science" /> 理科</label>
+                <label><input type="radio" name="subject" value="social" /> 社会</label>
+              </fieldset>
+              <p id="adminStatus" class="admin-screen__status">現在は開催していません。</p>
+              <div class="admin-screen__actions">
+                <button id="adminHostButton" class="admin-screen__host" type="submit">この教科で開催する</button>
+                <button id="adminStopButton" class="admin-screen__stop" type="button">開催を終了する</button>
+                <button id="adminBackButton" class="admin-screen__back" type="button">タイトルへ戻る</button>
+              </div>
+            </form>
           </div>
         </section>
         <div id="battleScene" class="battle-scene" aria-label="バトルシーン">
