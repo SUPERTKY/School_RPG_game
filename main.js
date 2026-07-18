@@ -7,6 +7,8 @@ const titleMoveDelayMs = 1000;
 const titleMoveDurationMs = 800;
 const maxHp = 120;
 const matchingPollMs = 1500;
+const sessionRequestTimeoutMs = 8000;
+const sessionRetryDelayMs = 450;
 const resultReturnMs = 10000;
 const questionDurationSeconds = 20;
 const feedbackDurationMs = 260;
@@ -314,12 +316,7 @@ const applyRemoteSession = (session) => {
 
 const loadRemoteSession = async () => {
   try {
-    const response = await fetch(sessionEndpoint, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`開催状態を読み込めませんでした: ${response.status}`);
-    }
-
-    applyRemoteSession(await response.json());
+    applyRemoteSession(await fetchSessionJson(sessionEndpoint, { cache: "no-store" }));
   } catch (error) {
     updateSessionUi();
     if (sessionNotice) {
@@ -331,37 +328,63 @@ const loadRemoteSession = async () => {
 };
 
 const saveRemoteSession = async (session) => {
-  const response = await fetch(sessionEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...session, adminPassword: authState.adminPassword }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`開催状態を保存できませんでした: ${response.status}`);
-  }
-
-  applyRemoteSession(await response.json());
+  applyRemoteSession(
+    await fetchSessionJson(sessionEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...session, adminPassword: authState.adminPassword }),
+    }),
+  );
 };
 
 
 
-const postSessionAction = async (payload) => {
-  const response = await fetch(sessionEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = new Error(`セッション操作に失敗しました: ${response.status}`);
-    error.result = result;
-    throw error;
+const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const fetchSessionJson = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), sessionRequestTimeoutMs);
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(`セッション通信に失敗しました: ${response.status}`);
+      error.result = result;
+      error.status = response.status;
+      throw error;
+    }
+    return result;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-  return result;
 };
 
-const notifyPlayerDisconnected = () => {
+const postSessionAction = async (payload, { retries = 1 } = {}) => {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetchSessionJson(sessionEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      lastError = error;
+      const canRetry = !error.status || error.status >= 500;
+      if (!canRetry || attempt === retries) {
+        throw error;
+      }
+      await wait(sessionRetryDelayMs * (attempt + 1));
+    }
+  }
+  throw lastError;
+};
+
+const notifyPlayerDisconnected = (event) => {
+  if (event?.persisted || document.visibilityState === "hidden") {
+    return;
+  }
   if (!["matching", "roulette", "player", "opponent", "question", "resolving"].includes(battleState.phase)) {
     return;
   }
@@ -455,6 +478,7 @@ const playTurnRoulette = async (firstIsPlayer) => {
   const rouletteRunId = battleState.rouletteRunId + 1;
   battleState.rouletteRunId = rouletteRunId;
   turnLabel.classList.add("is-hidden-before-start");
+  turnRoulette.hidden = false;
   turnRoulette.classList.add("is-playing");
   const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
   const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
@@ -463,6 +487,8 @@ const playTurnRoulette = async (firstIsPlayer) => {
 
   for (let step = 0; step < 18; step += 1) {
     if (battleState.rouletteRunId !== rouletteRunId) {
+      turnRoulette.classList.remove("is-playing");
+      turnRoulette.hidden = true;
       return false;
     }
     turnRouletteImage.src = rouletteImages[step % rouletteImages.length];
@@ -470,11 +496,14 @@ const playTurnRoulette = async (firstIsPlayer) => {
   }
 
   if (battleState.rouletteRunId !== rouletteRunId) {
+    turnRoulette.classList.remove("is-playing");
+    turnRoulette.hidden = true;
     return false;
   }
   turnRouletteImage.src = finalImage;
   await new Promise((resolve) => window.setTimeout(resolve, 650));
   turnRoulette.classList.remove("is-playing");
+  turnRoulette.hidden = true;
   turnLabel.classList.remove("is-hidden-before-start");
   return true;
 };
@@ -940,6 +969,7 @@ const resetBattle = () => {
   battleState.lastMatchVersion = -1;
   battleState.rouletteRunId += 1;
   turnRoulette.classList.remove("is-playing");
+  turnRoulette.hidden = true;
   turnLabel.classList.remove("is-hidden-before-start");
   questionPanel.hidden = true;
   updateHpDisplay();
@@ -1172,6 +1202,7 @@ battleActions.addEventListener("click", (event) => {
 });
 
 window.addEventListener("pagehide", notifyPlayerDisconnected);
+window.addEventListener("beforeunload", notifyPlayerDisconnected);
 
 window.addEventListener("load", async () => {
   await loadRemoteSession();
