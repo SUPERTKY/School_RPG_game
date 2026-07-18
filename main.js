@@ -10,7 +10,7 @@ const opponentWaitMs = 5000;
 const questionDurationSeconds = 20;
 const feedbackDurationMs = 260;
 const authEndpoint = "/api/auth";
-const gameSessionStorageKey = "school-rpg-game-session";
+const sessionEndpoint = "/api/session";
 const subjects = {
   math: { label: "数学", file: "questions/math_questions.json" },
   japanese: { label: "国語", file: "questions/japanese_questions.json" },
@@ -121,6 +121,7 @@ const authState = {
   startupUnlocked: false,
   mode: "startup",
   pendingResolve: null,
+  adminPassword: "",
 };
 
 const battleState = {
@@ -198,6 +199,10 @@ const handlePasswordSubmit = async (event) => {
       return;
     }
 
+    if (authState.mode === "admin") {
+      authState.adminPassword = passwordInput.value;
+    }
+
     closePasswordGate(true);
   } catch (error) {
     const variableName = authState.mode === "admin" ? "ADMIN_PASSWORD" : "PASSWORD";
@@ -269,23 +274,43 @@ const updateSessionUi = () => {
   }
 };
 
-const saveGameSession = () => {
-  localStorage.setItem(
-    gameSessionStorageKey,
-    JSON.stringify({ hosted: battleState.hosted, selectedSubjectKey: battleState.selectedSubjectKey }),
-  );
+const applyRemoteSession = (session) => {
+  battleState.hosted = session?.hosted === true;
+  battleState.selectedSubjectKey = subjects[session?.selectedSubjectKey] ? session.selectedSubjectKey : "math";
+  updateSessionUi();
 };
 
-const restoreGameSession = () => {
+const loadRemoteSession = async () => {
   try {
-    const savedSession = JSON.parse(localStorage.getItem(gameSessionStorageKey) ?? "{}");
-    battleState.hosted = savedSession.hosted === true;
-    battleState.selectedSubjectKey = subjects[savedSession.selectedSubjectKey] ? savedSession.selectedSubjectKey : "math";
+    const response = await fetch(sessionEndpoint, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`開催状態を読み込めませんでした: ${response.status}`);
+    }
+
+    applyRemoteSession(await response.json());
   } catch (error) {
     battleState.hosted = false;
-    battleState.selectedSubjectKey = "math";
+    updateSessionUi();
+    if (sessionNotice) {
+      sessionNotice.textContent = "オンラインの開催状態を確認できません。管理者に確認してください。";
+      sessionNotice.hidden = false;
+      sessionNotice.classList.toggle("is-visible", titleImage.classList.contains("is-settled"));
+    }
   }
-  updateSessionUi();
+};
+
+const saveRemoteSession = async (session) => {
+  const response = await fetch(sessionEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...session, adminPassword: authState.adminPassword }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`開催状態を保存できませんでした: ${response.status}`);
+  }
+
+  applyRemoteSession(await response.json());
 };
 
 const loadQuestions = async () => {
@@ -728,6 +753,35 @@ adminGameForm.addEventListener("submit", async (event) => {
   const formData = new FormData(adminGameForm);
   const nextSubjectKey = String(formData.get("subject") ?? "math");
   battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
+  adminHostButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催状態を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: true, selectedSubjectKey: battleState.selectedSubjectKey });
+    await loadQuestions();
+  } catch (error) {
+    adminStatus.textContent = "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminHostButton.disabled = false;
+  }
+});
+
+adminStopButton.addEventListener("click", async () => {
+  adminStopButton.disabled = true;
+  adminStatus.textContent = "オンラインに開催終了を保存しています...";
+  try {
+    await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
+  } catch (error) {
+    adminStatus.textContent = "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+  } finally {
+    adminStopButton.disabled = false;
+  }
+});
+
+adminGameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(adminGameForm);
+  const nextSubjectKey = String(formData.get("subject") ?? "math");
+  battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
   battleState.hosted = true;
   adminHostButton.disabled = true;
   await loadQuestions();
@@ -771,9 +825,10 @@ battleActions.addEventListener("click", (event) => {
 });
 
 window.addEventListener("load", async () => {
-  restoreGameSession();
+  await loadRemoteSession();
   resetBattle();
   loadQuestions();
+  window.setInterval(loadRemoteSession, 5000);
 
   authState.startupUnlocked = await showPasswordGate("startup");
   if (!authState.startupUnlocked) {
