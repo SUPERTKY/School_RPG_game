@@ -246,7 +246,7 @@ const startQuestionSession = (skillKey) => {
     timerId: window.setInterval(tickQuestionTimer, 200),
   };
   questionPanel.hidden = false;
-  setBattleMessage(`${skill.name}の${skill.difficulty === "hard" ? "難しい" : "通常"}問題です。20秒間でできるだけ多く答えてください。`);
+  setBattleMessage("");
   updateSkillButtons();
   updateQuestionScore();
   tickQuestionTimer();

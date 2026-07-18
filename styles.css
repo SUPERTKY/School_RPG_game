@@ -272,9 +272,12 @@ img {
 }
 
 .turn-panel {
+  position: relative;
   justify-self: center;
   align-self: start;
-  display: contents;
+  width: 100%;
+  min-height: clamp(44px, 7vw, 74px);
+  pointer-events: none;
 }
 
 .turn-panel__label {
