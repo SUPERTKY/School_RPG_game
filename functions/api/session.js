@@ -1,7 +1,8 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
 const waitingPlayerTimeoutMs = 30000;
-const matchPlayerTimeoutMs = 120000;
+// Polling two clients through KV can be delayed or reordered, so keep disconnect detection conservative.
+const matchPlayerTimeoutMs = 10 * 60 * 1000;
 
 const defaultSession = {
   hosted: false,
@@ -229,7 +230,13 @@ export async function onRequestPost({ request, env }) {
 
     touchMatchPlayer(match, playerId, now);
     finishMatchIfOpponentTimedOut(session, match, playerId, now);
-    return json({ ...(await writeSession(env, session)), matchStatus: match.disconnectReason ? "disconnected" : match.finished ? "finished" : "matched", match });
+    // Do not persist ordinary polling heartbeats: a stale getMatch write can overwrite a
+    // just-submitted skill in KV and leave the other player stuck on an old turn. Persist
+    // only when the poll actually changes the match outcome, such as a disconnect timeout.
+    if (match.disconnectReason) {
+      return json({ ...(await writeSession(env, session)), matchStatus: "disconnected", match });
+    }
+    return json({ ...session, matchStatus: match.finished ? "finished" : "matched", match });
   }
 
   if (action === "leaveMatch") {
