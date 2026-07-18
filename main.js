@@ -10,6 +10,14 @@ const opponentWaitMs = 5000;
 const questionDurationSeconds = 20;
 const feedbackDurationMs = 260;
 const authEndpoint = "/api/auth";
+const gameSessionStorageKey = "school-rpg-game-session";
+const subjects = {
+  math: { label: "数学", file: "questions/math_questions.json" },
+  japanese: { label: "国語", file: "questions/japanese_questions.json" },
+  english: { label: "英語", file: "questions/english_questions.json" },
+  science: { label: "理科", file: "questions/science_questions.json" },
+  social: { label: "社会", file: "questions/social_questions.json" },
+};
 const passwordModes = {
   startup: {
     title: "パスワード認証",
@@ -37,9 +45,14 @@ const fadeOverlay = document.querySelector("#fadeOverlay");
 const nextScreen = document.querySelector("#nextScreen");
 const titleImage = document.querySelector("#titleImage");
 const matchingButton = document.querySelector("#matchingButton");
+const sessionNotice = document.querySelector("#sessionNotice");
 const adminButton = document.querySelector("#adminButton");
 const adminScreen = document.querySelector("#adminScreen");
 const adminBackButton = document.querySelector("#adminBackButton");
+const adminGameForm = document.querySelector("#adminGameForm");
+const adminStatus = document.querySelector("#adminStatus");
+const adminHostButton = document.querySelector("#adminHostButton");
+const adminStopButton = document.querySelector("#adminStopButton");
 const passwordGate = document.querySelector("#passwordGate");
 const passwordForm = document.querySelector("#passwordForm");
 const passwordTitle = document.querySelector("#passwordTitle");
@@ -112,7 +125,9 @@ const authState = {
 
 const battleState = {
   phase: "idle",
-  mathQuestions: [],
+  selectedSubjectKey: "math",
+  hosted: false,
+  questions: [],
   questionSession: null,
   playerHp: maxHp,
   opponentHp: maxHp,
@@ -228,29 +243,73 @@ const setBattleMessage = (message) => {
   battleMessage.hidden = message.length === 0;
 };
 
-const loadMathQuestions = async () => {
+const getSelectedSubject = () => subjects[battleState.selectedSubjectKey] ?? subjects.math;
+
+const updateSessionUi = () => {
+  const subject = getSelectedSubject();
+  const statusText = battleState.hosted
+    ? `開催中: ${subject.label}`
+    : "現在は開催していません。管理者画面で教科を選んで開催してください。";
+
+  subjectLabel.textContent = `教科: ${subject.label}`;
+  matchingButton.disabled = !battleState.hosted;
+  matchingButton.title = battleState.hosted ? `${subject.label}でマッチング開始` : "";
+  matchingButton.classList.toggle("is-visible", battleState.hosted && titleImage.classList.contains("is-settled"));
+  if (sessionNotice) {
+    sessionNotice.hidden = battleState.hosted;
+    sessionNotice.textContent = "現在開催していません。管理者が開催するまで遊べません。";
+    sessionNotice.classList.toggle("is-visible", !battleState.hosted && titleImage.classList.contains("is-settled"));
+  }
+  if (adminStatus) {
+    adminStatus.textContent = statusText;
+  }
+  const selectedSubjectInput = adminGameForm?.querySelector(`input[name="subject"][value="${battleState.selectedSubjectKey}"]`);
+  if (selectedSubjectInput) {
+    selectedSubjectInput.checked = true;
+  }
+};
+
+const saveGameSession = () => {
+  localStorage.setItem(
+    gameSessionStorageKey,
+    JSON.stringify({ hosted: battleState.hosted, selectedSubjectKey: battleState.selectedSubjectKey }),
+  );
+};
+
+const restoreGameSession = () => {
   try {
-    const response = await fetch("questions/math_questions.json", { cache: "no-store" });
+    const savedSession = JSON.parse(localStorage.getItem(gameSessionStorageKey) ?? "{}");
+    battleState.hosted = savedSession.hosted === true;
+    battleState.selectedSubjectKey = subjects[savedSession.selectedSubjectKey] ? savedSession.selectedSubjectKey : "math";
+  } catch (error) {
+    battleState.hosted = false;
+    battleState.selectedSubjectKey = "math";
+  }
+  updateSessionUi();
+};
+
+const loadQuestions = async () => {
+  const subject = getSelectedSubject();
+  try {
+    const response = await fetch(subject.file, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`問題ファイルを読み込めませんでした: ${response.status}`);
     }
 
     const questions = await response.json();
-    battleState.mathQuestions = Array.isArray(questions) ? questions : [];
-    if (subjectLabel) {
-      subjectLabel.textContent = "教科: 数学";
-    }
+    battleState.questions = Array.isArray(questions) ? questions : [];
+    updateSessionUi();
   } catch (error) {
-    battleState.mathQuestions = [];
-    setBattleMessage("questions/math_questions.json の読み込みに失敗しました。ページを再読み込みしてください。");
+    battleState.questions = [];
+    setBattleMessage(`${subject.file} の読み込みに失敗しました。ページを再読み込みしてください。`);
   }
 };
 
 const isQuestionVisible = (question) => question.visible !== false;
 
 const getQuestionsByDifficulty = (difficulty) =>
-  battleState.mathQuestions.filter(
-    (question) => question.difficulty === difficulty && question.subject === "数学" && isQuestionVisible(question),
+  battleState.questions.filter(
+    (question) => question.difficulty === difficulty && question.subject === getSelectedSubject().label && isQuestionVisible(question),
   );
 
 const shuffleArray = (items) => {
@@ -341,7 +400,7 @@ const startQuestionSession = (skillKey) => {
   const questions = shuffleQuestions(getQuestionsByDifficulty(skill.difficulty));
 
   if (questions.length === 0) {
-    setBattleMessage("この技に対応する数学の問題がありません。questions/math_questions.json を確認してください。");
+    setBattleMessage("この技に対応する開催教科の問題がありません。questions フォルダを確認してください。");
     return;
   }
 
@@ -612,14 +671,20 @@ const resetBattle = () => {
   updateSkillButtons();
 };
 
-const startBattleScene = () => {
+const startBattleScene = async () => {
   if (nextScreen.classList.contains("is-battle-starting")) {
+    return;
+  }
+
+  if (!battleState.hosted) {
+    setBattleMessage("管理者がゲームを開催するまで遊べません。");
     return;
   }
 
   matchingButton.disabled = true;
   nextScreen.classList.add("is-battle-starting");
   resetBattle();
+  await loadQuestions();
 
   window.setTimeout(() => {
     battleScene.classList.add("is-visible");
@@ -639,7 +704,7 @@ const showNextScreen = () => {
       titleImage.classList.add("is-settled");
 
       window.setTimeout(() => {
-        matchingButton.classList.add("is-visible");
+        updateSessionUi();
         adminButton.classList.add("is-visible");
       }, titleMoveDurationMs);
     }, titleFadeDurationMs + titleMoveDelayMs);
@@ -654,14 +719,34 @@ adminButton.addEventListener("click", async () => {
     adminScreen.hidden = false;
     adminButton.classList.remove("is-visible");
     matchingButton.classList.remove("is-visible");
+    sessionNotice?.classList.remove("is-visible");
   }
+});
+
+adminGameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(adminGameForm);
+  const nextSubjectKey = String(formData.get("subject") ?? "math");
+  battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
+  battleState.hosted = true;
+  adminHostButton.disabled = true;
+  await loadQuestions();
+  saveGameSession();
+  updateSessionUi();
+  adminHostButton.disabled = false;
+});
+
+adminStopButton.addEventListener("click", () => {
+  battleState.hosted = false;
+  saveGameSession();
+  updateSessionUi();
 });
 
 adminBackButton.addEventListener("click", () => {
   adminScreen.hidden = true;
   if (!nextScreen.classList.contains("is-battle-starting")) {
     adminButton.classList.add("is-visible");
-    matchingButton.classList.add("is-visible");
+    updateSessionUi();
   }
 });
 
@@ -686,8 +771,9 @@ battleActions.addEventListener("click", (event) => {
 });
 
 window.addEventListener("load", async () => {
+  restoreGameSession();
   resetBattle();
-  loadMathQuestions();
+  loadQuestions();
 
   authState.startupUnlocked = await showPasswordGate("startup");
   if (!authState.startupUnlocked) {
