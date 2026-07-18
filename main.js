@@ -144,6 +144,8 @@ const battleState = {
   closingRound: false,
   playerId: localStorage.getItem("schoolRpgPlayerId") || crypto.randomUUID(),
   match: null,
+  lastMatchVersion: -1,
+  matchSyncTimerId: null,
   matchingTimerId: null,
   eliminatedTournamentId: Number(localStorage.getItem("schoolRpgEliminatedTournamentId") || "-1"),
   questions: [],
@@ -151,6 +153,7 @@ const battleState = {
   playerHp: maxHp,
   opponentHp: maxHp,
   playerGuardReduction: 0,
+  opponentGuardReduction: 0,
   cooldowns: {
     recover: 0,
     guard: 0,
@@ -371,6 +374,7 @@ const forceReturnToTitle = (message = "タイトルに戻りました。") => {
     window.clearInterval(battleState.matchingTimerId);
     battleState.matchingTimerId = null;
   }
+  stopMatchSync();
   resetBattle();
   nextScreen.classList.remove("is-battle-starting");
   battleScene.classList.remove("is-visible");
@@ -673,7 +677,6 @@ const tickCooldownsAtPlayerTurnStart = () => {
 const startPlayerTurn = () => {
   battleState.phase = "player";
   battleState.playerGuardReduction = 0;
-  tickCooldownsAtPlayerTurnStart();
   turnLabel.src = "assets/images/ui/Icon/your_turn.png";
   turnLabel.alt = "自分のターン";
   turnLabel.classList.remove("is-entering");
@@ -685,28 +688,89 @@ const startPlayerTurn = () => {
   playAudioFromStart(turnStartAudio);
 };
 
+
+const applyRemoteMatch = (match) => {
+  if (!match || !match.playerIds?.includes(battleState.playerId)) {
+    return;
+  }
+  const opponentId = match.playerIds.find((id) => id !== battleState.playerId);
+  const previousVersion = battleState.lastMatchVersion;
+  battleState.match = match;
+  battleState.lastMatchVersion = Number.isInteger(match.version) ? match.version : previousVersion;
+  battleState.playerHp = match.hpByPlayerId?.[battleState.playerId] ?? battleState.playerHp;
+  battleState.opponentHp = match.hpByPlayerId?.[opponentId] ?? battleState.opponentHp;
+  battleState.playerGuardReduction = match.guardByPlayerId?.[battleState.playerId] ?? 0;
+  battleState.opponentGuardReduction = match.guardByPlayerId?.[opponentId] ?? 0;
+  battleState.cooldowns = { ...battleState.cooldowns, ...(match.cooldownsByPlayerId?.[battleState.playerId] ?? {}) };
+  updateHpDisplay();
+  updateGuardOverlay();
+
+  if (match.lastAction && battleState.lastMatchVersion !== previousVersion) {
+    const actionByMe = match.lastAction.playerId === battleState.playerId;
+    const target = actionByMe ? opponentCharacter : playerCharacter;
+    if (match.lastAction.skillType === "damage") {
+      playDamageEffect(target, match.lastAction.effectValue);
+      playDamageAudio(match.lastAction.effectValue);
+    }
+    if (match.lastAction.skillType === "recover" && actionByMe) {
+      playRecoverEffect(playerCharacter);
+      playAudioFromStart(recoverAudio);
+    }
+    if (match.lastAction.skillType === "guard" && actionByMe) {
+      playAudioFromStart(guardAudio);
+    }
+  }
+
+  if (match.finished) {
+    stopMatchSync();
+    showResult(match.winnerPlayerId === battleState.playerId ? "win" : "lose");
+    return;
+  }
+
+  if (match.turnPlayerId === battleState.playerId) {
+    if (battleState.phase !== "player" && battleState.phase !== "question" && battleState.phase !== "resolving") {
+      startPlayerTurn();
+    }
+  } else if (battleState.phase !== "opponent" && battleState.phase !== "question" && battleState.phase !== "resolving") {
+    startOpponentTurn();
+  }
+};
+
+const syncMatch = async () => {
+  if (!battleState.match?.id || battleState.phase === "finished") {
+    return;
+  }
+  try {
+    const session = await postSessionAction({ action: "getMatch", playerId: battleState.playerId, matchId: battleState.match.id });
+    applyRemoteSession(session);
+    if (session.match) {
+      applyRemoteMatch(session.match);
+    }
+  } catch (error) {
+    setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
+  }
+};
+
+const startMatchSync = () => {
+  stopMatchSync();
+  battleState.matchSyncTimerId = window.setInterval(syncMatch, 1000);
+};
+
+const stopMatchSync = () => {
+  if (battleState.matchSyncTimerId) {
+    window.clearInterval(battleState.matchSyncTimerId);
+    battleState.matchSyncTimerId = null;
+  }
+};
+
 const startOpponentTurn = () => {
   battleState.phase = "opponent";
   turnLabel.classList.remove("is-entering");
   turnLabel.src = "assets/images/ui/Icon/enemy_turn.png";
   turnLabel.alt = "相手のターン";
-  setBattleMessage("相手のターンです。少し待ってください。");
+  setBattleMessage("相手のターンです。相手の操作を待っています。");
   updateSkillButtons();
-
-  window.setTimeout(() => {
-    if (battleState.phase !== "opponent" || battleState.playerHp <= 0 || battleState.opponentHp <= 0) {
-      return;
-    }
-    const baseDamage = Math.max(4, 14 - Math.round((14 * battleState.playerGuardReduction) / 100));
-    battleState.playerHp = Math.max(0, battleState.playerHp - baseDamage);
-    updateHpDisplay();
-    playDamageEffect(playerCharacter, baseDamage);
-    playDamageAudio(baseDamage);
-    setBattleMessage(`相手の攻撃！ 自分に${baseDamage}ダメージ。`);
-    if (!finishBattleIfNeeded()) {
-      window.setTimeout(startPlayerTurn, 900);
-    }
-  }, 1500);
+  syncMatch();
 };
 
 const finishBattleIfNeeded = () => {
@@ -723,57 +787,50 @@ const finishBattleIfNeeded = () => {
   return false;
 };
 
-const applySkillResult = (skillKey, effectivePoint, correct, wrong) => {
+const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
   const skill = skills[skillKey];
   const effectValue = Math.round(skill.base + effectivePoint * skill.perPoint);
   const scoreText = `正解${correct}・誤答${wrong}・有効得点${effectivePoint}`;
   let message = "";
-  let damageTarget = null;
-  let recoverAmount = 0;
+  let guardReduction = 0;
 
   if (skill.type === "damage") {
-    battleState.opponentHp = Math.max(0, battleState.opponentHp - effectValue);
-    message = `${skill.name}！ ${scoreText}で、相手に${effectValue}ダメージ。`;
-    damageTarget = opponentCharacter;
+    message = `${skill.name}！ ${scoreText}で、相手に${effectValue}ダメージを送信。`;
   }
 
   if (skill.type === "recover") {
-    const beforeHp = battleState.playerHp;
-    battleState.playerHp = Math.min(maxHp, battleState.playerHp + effectValue);
-    recoverAmount = battleState.playerHp - beforeHp;
-    message = `${skill.name}！ ${scoreText}で、自分のHPを${recoverAmount}回復。`;
+    message = `${skill.name}！ ${scoreText}で、自分のHPを${effectValue}回復送信。`;
   }
 
   if (skill.type === "guard") {
-    const reduction = Math.min(skill.maxReduction, effectValue);
-    battleState.playerGuardReduction = reduction;
-    message = `${skill.name}！ ${scoreText}で、次に受けるダメージを${reduction}%軽減。`;
+    guardReduction = Math.min(skill.maxReduction, effectValue);
+    message = `${skill.name}！ ${scoreText}で、次に受けるダメージを${guardReduction}%軽減。`;
   }
 
-  if (skill.cooldownTurns > 0) {
-    battleState.cooldowns[skillKey] = skill.cooldownTurns + 1;
-  }
-
-  updateHpDisplay();
-  updateGuardOverlay();
-  playDamageEffect(damageTarget, skill.type === "damage" ? effectValue : 0);
-  if (skill.type === "damage") {
-    playDamageAudio(effectValue);
-  }
-  if (skill.type === "recover") {
-    playRecoverEffect(playerCharacter);
-    playAudioFromStart(recoverAudio);
-  }
-  if (skill.type === "guard") {
-    playAudioFromStart(guardAudio);
-  }
+  battleState.phase = "resolving";
   setBattleMessage(message);
+  updateSkillButtons();
 
-  if (!finishBattleIfNeeded()) {
-    window.setTimeout(startOpponentTurn, 900);
+  try {
+    const session = await postSessionAction({
+      action: "submitSkill",
+      playerId: battleState.playerId,
+      matchId: battleState.match?.id,
+      skillKey,
+      skillType: skill.type,
+      effectValue,
+      guardReduction,
+      cooldownTurns: skill.cooldownTurns,
+      correct,
+      wrong,
+    });
+    applyRemoteSession(session);
+    applyRemoteMatch(session.match);
+  } catch (error) {
+    setBattleMessage("技の送信に失敗しました。もう一度同期します。");
+    await syncMatch();
   }
 };
-
 
 const useSkill = (skillKey) => {
   if (battleState.phase !== "player") {
@@ -799,14 +856,30 @@ const resetBattle = () => {
   battleState.cooldowns.guard = 0;
   battleState.cooldowns.burst = 0;
   battleState.questionSession = null;
+  battleState.match = null;
+  battleState.lastMatchVersion = -1;
   questionPanel.hidden = true;
   updateHpDisplay();
   updateGuardOverlay();
   updateSkillButtons();
 };
 
-const beginMatchedBattle = async (match) => {
+const hydrateRemoteMatch = (match) => {
+  const opponentId = match.playerIds.find((id) => id !== battleState.playerId);
   battleState.match = match;
+  battleState.lastMatchVersion = Number.isInteger(match.version) ? match.version : -1;
+  battleState.playerHp = match.hpByPlayerId?.[battleState.playerId] ?? maxHp;
+  battleState.opponentHp = match.hpByPlayerId?.[opponentId] ?? maxHp;
+  battleState.playerGuardReduction = match.guardByPlayerId?.[battleState.playerId] ?? 0;
+  battleState.opponentGuardReduction = match.guardByPlayerId?.[opponentId] ?? 0;
+  battleState.cooldowns = { ...battleState.cooldowns, ...(match.cooldownsByPlayerId?.[battleState.playerId] ?? {}) };
+  updateHpDisplay();
+  updateGuardOverlay();
+};
+
+const beginMatchedBattle = async (match) => {
+  hydrateRemoteMatch(match);
+  startMatchSync();
   if (battleState.matchingTimerId) {
     window.clearInterval(battleState.matchingTimerId);
     battleState.matchingTimerId = null;

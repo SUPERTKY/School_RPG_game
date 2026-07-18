@@ -57,7 +57,39 @@ const writeSession = async (env, session) => {
   return nextSession;
 };
 
+const maxHp = 120;
+
 const randomId = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+
+const createMatch = (session, playerId, opponentId) => {
+  const firstPlayerId = Math.random() < 0.5 ? playerId : opponentId;
+  const match = {
+    id: randomId(),
+    round: session.round,
+    playerIds: [playerId, opponentId],
+    firstPlayerId,
+    turnPlayerId: firstPlayerId,
+    version: 0,
+    finished: false,
+    winnerPlayerId: null,
+    loserPlayerId: null,
+    hpByPlayerId: { [playerId]: maxHp, [opponentId]: maxHp },
+    guardByPlayerId: { [playerId]: 0, [opponentId]: 0 },
+    cooldownsByPlayerId: {
+      [playerId]: { recover: 0, guard: 0, burst: 0 },
+      [opponentId]: { recover: 0, guard: 0, burst: 0 },
+    },
+    lastAction: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  session.matches[match.id] = match;
+  return match;
+};
+
+const getOpponentId = (match, playerId) => match.playerIds.find((id) => id !== playerId);
+
+const normalizeNumber = (value, fallback = 0) => (Number.isFinite(value) ? value : fallback);
 
 const requireAdmin = (payload, env) => {
   const expectedPassword = env.ADMIN_PASSWORD ?? "";
@@ -104,21 +136,88 @@ export async function onRequestPost({ request, env }) {
     if (otherPlayers.length > 0) {
       const opponent = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
       session.waitingPlayers = session.waitingPlayers.filter((player) => player.id !== playerId && player.id !== opponent.id);
-      const firstPlayerId = Math.random() < 0.5 ? playerId : opponent.id;
-      const match = {
-        id: randomId(),
-        round: session.round,
-        playerIds: [playerId, opponent.id],
-        firstPlayerId,
-        finished: false,
-        createdAt: Date.now(),
-      };
-      session.matches[match.id] = match;
+      const match = createMatch(session, playerId, opponent.id);
       return json({ ...(await writeSession(env, session)), matchStatus: "matched", match });
     }
 
     session.waitingPlayers = [...session.waitingPlayers.filter((player) => player.id !== playerId), { id: playerId, joinedAt: Date.now() }];
     return json({ ...(await writeSession(env, session)), matchStatus: "waiting" });
+  }
+
+
+  if (action === "getMatch") {
+    const playerId = String(payload?.playerId ?? "");
+    const matchId = String(payload?.matchId ?? "");
+    const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => item.playerIds?.includes(playerId) && !item.finished);
+    return json({ ...session, matchStatus: match ? "matched" : "missing", match });
+  }
+
+  if (action === "submitSkill") {
+    const playerId = String(payload?.playerId ?? "");
+    const matchId = String(payload?.matchId ?? "");
+    const match = session.matches[matchId];
+    if (!match || !match.playerIds?.includes(playerId)) {
+      return json({ ...session, matchStatus: "missing" }, { status: 404 });
+    }
+    if (match.finished) {
+      return json({ ...session, matchStatus: "finished", match });
+    }
+    if (match.turnPlayerId !== playerId) {
+      return json({ ...session, matchStatus: "notYourTurn", match }, { status: 409 });
+    }
+
+    const opponentId = getOpponentId(match, playerId);
+    const skillType = payload?.skillType === "recover" || payload?.skillType === "guard" ? payload.skillType : "damage";
+    const skillKey = String(payload?.skillKey ?? "attack");
+    const effectValue = Math.max(0, Math.round(normalizeNumber(payload?.effectValue)));
+    const guardReduction = Math.max(0, Math.min(60, Math.round(normalizeNumber(payload?.guardReduction))));
+    const cooldownTurns = Math.max(0, Math.round(normalizeNumber(payload?.cooldownTurns)));
+    const correct = Math.max(0, Math.round(normalizeNumber(payload?.correct)));
+    const wrong = Math.max(0, Math.round(normalizeNumber(payload?.wrong)));
+
+    match.hpByPlayerId[playerId] ??= maxHp;
+    match.hpByPlayerId[opponentId] ??= maxHp;
+    match.guardByPlayerId[playerId] ??= 0;
+    match.guardByPlayerId[opponentId] ??= 0;
+    match.cooldownsByPlayerId[playerId] ??= { recover: 0, guard: 0, burst: 0 };
+
+    if (skillType === "damage") {
+      const reducedDamage = Math.max(0, Math.round(effectValue * (1 - (match.guardByPlayerId[opponentId] ?? 0) / 100)));
+      match.hpByPlayerId[opponentId] = Math.max(0, match.hpByPlayerId[opponentId] - reducedDamage);
+      match.guardByPlayerId[opponentId] = 0;
+      match.lastAction = { playerId, skillKey, skillType, effectValue: reducedDamage, correct, wrong, at: Date.now() };
+    }
+    if (skillType === "recover") {
+      const beforeHp = match.hpByPlayerId[playerId];
+      match.hpByPlayerId[playerId] = Math.min(maxHp, match.hpByPlayerId[playerId] + effectValue);
+      match.lastAction = { playerId, skillKey, skillType, effectValue: match.hpByPlayerId[playerId] - beforeHp, correct, wrong, at: Date.now() };
+    }
+    if (skillType === "guard") {
+      match.guardByPlayerId[playerId] = guardReduction;
+      match.lastAction = { playerId, skillKey, skillType, effectValue: guardReduction, correct, wrong, at: Date.now() };
+    }
+
+    if (cooldownTurns > 0) {
+      match.cooldownsByPlayerId[playerId][skillKey] = cooldownTurns + 1;
+    }
+
+    if (match.hpByPlayerId[opponentId] <= 0) {
+      match.finished = true;
+      match.winnerPlayerId = playerId;
+      match.loserPlayerId = opponentId;
+      if (!session.eliminatedPlayerIds.includes(opponentId)) {
+        session.eliminatedPlayerIds.push(opponentId);
+      }
+    } else {
+      match.cooldownsByPlayerId[opponentId] ??= { recover: 0, guard: 0, burst: 0 };
+      Object.keys(match.cooldownsByPlayerId[opponentId]).forEach((key) => {
+        match.cooldownsByPlayerId[opponentId][key] = Math.max(0, match.cooldownsByPlayerId[opponentId][key] - 1);
+      });
+      match.turnPlayerId = opponentId;
+    }
+    match.version += 1;
+    match.updatedAt = Date.now();
+    return json({ ...(await writeSession(env, session)), matchStatus: match.finished ? "finished" : "matched", match });
   }
 
   if (action === "finishMatch") {
