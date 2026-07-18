@@ -3,6 +3,8 @@ const validSubjectKeys = new Set(["math", "japanese", "english", "science", "soc
 const waitingPlayerTimeoutMs = 30000;
 // Polling two clients through KV can be delayed or reordered, so keep disconnect detection conservative.
 const matchPlayerTimeoutMs = 10 * 60 * 1000;
+const matchHeartbeatTtlSeconds = 60 * 60;
+const matchHeartbeatKeyPrefix = "match:";
 
 const defaultSession = {
   hosted: false,
@@ -79,6 +81,31 @@ const writeSession = async (env, session) => {
   return nextSession;
 };
 
+
+const deleteMatchHeartbeats = async (env, { cursor, limit = 100 } = {}) => {
+  const store = getSessionStore(env);
+  if (!store?.list || !store?.delete) {
+    return { deletedCount: 0, cursor: undefined, complete: true };
+  }
+
+  const safeLimit = Math.max(1, Math.min(100, Math.round(normalizeNumber(limit, 100))));
+  try {
+    const result = await store.list({ prefix: matchHeartbeatKeyPrefix, cursor, limit: safeLimit });
+    const keys = Array.isArray(result?.keys) ? result.keys : [];
+    for (const key of keys) {
+      await store.delete(key.name);
+    }
+    return {
+      deletedCount: keys.length,
+      cursor: result?.list_complete ? undefined : result?.cursor,
+      complete: result?.list_complete === true || !result?.cursor,
+    };
+  } catch {
+    // Cleanup is best-effort; do not block tournament administration if KV listing/deletion fails.
+    return { deletedCount: 0, cursor, complete: false };
+  }
+};
+
 const maxHp = 120;
 
 const randomId = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -105,7 +132,7 @@ const pruneCurrentRoundWaitingPlayers = (session, playerIdToExclude = "", now = 
   session.waitingPlayers = Array.from(uniquePlayers.values());
 };
 
-const getMatchHeartbeatKey = (matchId, playerId) => `match:${matchId}:seen:${playerId}`;
+const getMatchHeartbeatKey = (matchId, playerId) => `${matchHeartbeatKeyPrefix}${matchId}:seen:${playerId}`;
 
 const touchMatchPlayer = (match, playerId, now = Date.now()) => {
   match.lastSeenByPlayerId ??= {};
@@ -117,7 +144,7 @@ const writeMatchHeartbeat = async (env, match, playerId, now = Date.now()) => {
   const store = getSessionStore(env);
   if (store && match?.id && playerId) {
     try {
-      await store.put(getMatchHeartbeatKey(match.id, playerId), String(now));
+      await store.put(getMatchHeartbeatKey(match.id, playerId), String(now), { expirationTtl: matchHeartbeatTtlSeconds });
     } catch {
       // A heartbeat is only a liveness hint; never fail the battle sync because it could not be saved.
     }
@@ -385,6 +412,11 @@ const handlePost = async ({ request, env }) => {
   const adminCheck = requireAdmin(payload, env);
   if (!adminCheck.ok) {
     return adminCheck.response;
+  }
+
+  if (action === "cleanupMatchHeartbeats") {
+    const cleanup = await deleteMatchHeartbeats(env, { cursor: payload?.cursor, limit: payload?.limit });
+    return json({ ...session, heartbeatKeysDeleted: cleanup.deletedCount, cleanupCursor: cleanup.cursor, cleanupComplete: cleanup.complete });
   }
 
   if (action === "resetTournamentNumber") {
