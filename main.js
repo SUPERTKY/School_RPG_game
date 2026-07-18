@@ -162,6 +162,7 @@ const battleState = {
   },
 };
 localStorage.setItem("schoolRpgPlayerId", battleState.playerId);
+let answerIconTimerId = null;
 
 const setPasswordMode = (mode) => {
   authState.mode = mode;
@@ -356,12 +357,28 @@ const postSessionAction = async (payload) => {
   return response.json();
 };
 
+const hideAnswerIcon = () => {
+  if (!answerFeedbackIcon) return;
+  if (answerIconTimerId) {
+    window.clearTimeout(answerIconTimerId);
+    answerIconTimerId = null;
+  }
+  answerFeedbackIcon.classList.remove("is-playing");
+  answerFeedbackIcon.hidden = true;
+  answerFeedbackIcon.removeAttribute("src");
+};
+
 const playAnswerIcon = (isCorrect) => {
   if (!answerFeedbackIcon) return;
+  hideAnswerIcon();
   answerFeedbackIcon.src = isCorrect ? "assets/images/ui/Icon/correct.png" : "assets/images/ui/Icon/wrong.png";
-  answerFeedbackIcon.classList.remove("is-playing");
-  void answerFeedbackIcon.offsetWidth;
-  answerFeedbackIcon.classList.add("is-playing");
+  answerFeedbackIcon.hidden = false;
+  window.requestAnimationFrame(() => {
+    if (!answerFeedbackIcon.hidden) {
+      answerFeedbackIcon.classList.add("is-playing");
+    }
+  });
+  answerIconTimerId = window.setTimeout(hideAnswerIcon, feedbackDurationMs + 80);
   if (isCorrect) {
     playAudioFromStart(correctAudio);
   }
@@ -489,10 +506,12 @@ const showQuestion = () => {
     session.index = 0;
   }
 
+  hideAnswerIcon();
   const question = session.questions[session.index];
   questionText.textContent = question.question;
   questionChoices.innerHTML = "";
   answerFeedback.textContent = "";
+  delete answerFeedback.dataset.result;
   const shuffledChoices = getShuffledChoices(question);
   shuffledChoices.forEach((choice) => {
     const button = document.createElement("button");
@@ -513,6 +532,7 @@ const finishQuestionSession = () => {
 
   session.finished = true;
   window.clearInterval(session.timerId);
+  hideAnswerIcon();
   questionPanel.hidden = true;
   battleState.phase = "resolving";
   const effectivePoint = Math.max(0, session.correct - session.wrong * 0.5);
@@ -554,6 +574,7 @@ const startQuestionSession = (skillKey) => {
     endsAt: Date.now() + questionDurationSeconds * 1000,
     timerId: window.setInterval(tickQuestionTimer, 200),
   };
+  hideAnswerIcon();
   questionPanel.hidden = false;
   setBattleMessage("");
   updateSkillButtons();
