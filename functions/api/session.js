@@ -99,21 +99,18 @@ const touchMatchPlayer = (match, playerId, now = Date.now()) => {
   match.lastSeenByPlayerId[playerId] = now;
 };
 
-const finishMatchAsDisconnected = (session, match, disconnectedPlayerId, now = Date.now()) => {
+const cancelMatchForDisconnect = (match, disconnectedPlayerId, now = Date.now()) => {
   if (!match || match.finished) {
     return match;
   }
 
-  const winnerPlayerId = getOpponentId(match, disconnectedPlayerId);
   match.finished = true;
-  match.winnerPlayerId = winnerPlayerId;
-  match.loserPlayerId = disconnectedPlayerId;
+  match.winnerPlayerId = null;
+  match.loserPlayerId = null;
+  match.disconnectedPlayerId = disconnectedPlayerId;
   match.disconnectReason = "playerDisconnected";
   match.version = (Number.isInteger(match.version) ? match.version : 0) + 1;
   match.updatedAt = now;
-  if (disconnectedPlayerId && !session.eliminatedPlayerIds.includes(disconnectedPlayerId)) {
-    session.eliminatedPlayerIds.push(disconnectedPlayerId);
-  }
   return match;
 };
 
@@ -121,7 +118,7 @@ const finishMatchIfOpponentTimedOut = (session, match, playerId, now = Date.now(
   const opponentId = getOpponentId(match, playerId);
   const opponentLastSeen = match.lastSeenByPlayerId?.[opponentId] ?? match.updatedAt ?? match.createdAt ?? now;
   if (now - opponentLastSeen > matchPlayerTimeoutMs) {
-    finishMatchAsDisconnected(session, match, opponentId, now);
+    cancelMatchForDisconnect(match, opponentId, now);
   }
   return match;
 };
@@ -232,7 +229,7 @@ export async function onRequestPost({ request, env }) {
 
     touchMatchPlayer(match, playerId, now);
     finishMatchIfOpponentTimedOut(session, match, playerId, now);
-    return json({ ...(await writeSession(env, session)), matchStatus: match.finished ? "finished" : "matched", match });
+    return json({ ...(await writeSession(env, session)), matchStatus: match.disconnectReason ? "disconnected" : match.finished ? "finished" : "matched", match });
   }
 
   if (action === "leaveMatch") {
@@ -241,7 +238,7 @@ export async function onRequestPost({ request, env }) {
     session.waitingPlayers = session.waitingPlayers.filter((player) => player.id !== playerId);
     const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => isCurrentRoundMatch(session, item) && item.playerIds?.includes(playerId));
     if (match?.playerIds?.includes(playerId)) {
-      finishMatchAsDisconnected(session, match, playerId);
+      cancelMatchForDisconnect(match, playerId);
     }
     return json(await writeSession(env, session));
   }
@@ -327,7 +324,7 @@ export async function onRequestPost({ request, env }) {
     }
     match.version += 1;
     match.updatedAt = Date.now();
-    return json({ ...(await writeSession(env, session)), matchStatus: match.finished ? "finished" : "matched", match });
+    return json({ ...(await writeSession(env, session)), matchStatus: match.disconnectReason ? "disconnected" : match.finished ? "finished" : "matched", match });
   }
 
   if (action === "finishMatch") {
