@@ -59,6 +59,7 @@ const adminStatus = document.querySelector("#adminStatus");
 const adminHostButton = document.querySelector("#adminHostButton");
 const adminStopButton = document.querySelector("#adminStopButton");
 const adminRoundButton = document.querySelector("#adminRoundButton");
+const adminResetTournamentButton = document.querySelector("#adminResetTournamentButton");
 const passwordGate = document.querySelector("#passwordGate");
 const passwordForm = document.querySelector("#passwordForm");
 const passwordTitle = document.querySelector("#passwordTitle");
@@ -408,16 +409,19 @@ const showResult = async (result) => {
 const playTurnRoulette = async (firstIsPlayer) => {
   turnLabel.classList.add("is-hidden-before-start");
   turnRoulette.classList.add("is-playing");
-  const images = ["assets/images/ui/Icon/your_turn.png", "assets/images/ui/Icon/enemy_turn.png"];
+  const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
+  const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
+  const rouletteImages = firstIsPlayer ? [enemyTurnImage, yourTurnImage] : [yourTurnImage, enemyTurnImage];
   let index = 0;
+  turnRouletteImage.src = rouletteImages[index];
   const timerId = window.setInterval(() => {
-    turnRouletteImage.src = images[index % 2];
     index += 1;
-  }, 130);
-  await new Promise((resolve) => window.setTimeout(resolve, 1800));
+    turnRouletteImage.src = rouletteImages[index % rouletteImages.length];
+  }, 120);
+  await new Promise((resolve) => window.setTimeout(resolve, 2160));
   window.clearInterval(timerId);
-  turnRouletteImage.src = firstIsPlayer ? images[0] : images[1];
-  await new Promise((resolve) => window.setTimeout(resolve, 500));
+  turnRouletteImage.src = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+  await new Promise((resolve) => window.setTimeout(resolve, 650));
   turnRoulette.classList.remove("is-playing");
   turnLabel.classList.remove("is-hidden-before-start");
 };
@@ -728,10 +732,10 @@ const applyRemoteMatch = (match) => {
   }
 
   if (match.turnPlayerId === battleState.playerId) {
-    if (battleState.phase !== "player" && battleState.phase !== "question" && battleState.phase !== "resolving") {
+    if (battleState.phase !== "player" && battleState.phase !== "question") {
       startPlayerTurn();
     }
-  } else if (battleState.phase !== "opponent" && battleState.phase !== "question" && battleState.phase !== "resolving") {
+  } else if (battleState.phase !== "opponent" && battleState.phase !== "question") {
     startOpponentTurn();
   }
 };
@@ -1019,6 +1023,23 @@ adminRoundButton.addEventListener("click", async () => {
     adminStatus.textContent = "トーナメント進行に失敗しました。";
   } finally {
     adminRoundButton.disabled = false;
+  }
+});
+
+
+adminResetTournamentButton.addEventListener("click", async () => {
+  adminResetTournamentButton.disabled = true;
+  adminStatus.textContent = "大会番号をリセットしています...";
+  try {
+    await postSessionAction({ action: "resetTournamentNumber", adminPassword: authState.adminPassword });
+    localStorage.removeItem("schoolRpgEliminatedTournamentId");
+    battleState.eliminatedTournamentId = -1;
+    adminRoundButton.textContent = "大会最初のマッチング締め切り";
+    await loadRemoteSession();
+  } catch (error) {
+    adminStatus.textContent = "大会番号のリセットに失敗しました。";
+  } finally {
+    adminResetTournamentButton.disabled = false;
   }
 });
 

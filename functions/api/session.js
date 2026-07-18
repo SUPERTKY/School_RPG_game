@@ -238,6 +238,16 @@ export async function onRequestPost({ request, env }) {
     return adminCheck.response;
   }
 
+  if (action === "resetTournamentNumber") {
+    session.tournamentId = 0;
+    session.round = 0;
+    session.closingRound = false;
+    session.eliminatedPlayerIds = [];
+    session.waitingPlayers = [];
+    session.matches = {};
+    return json(await writeSession(env, session));
+  }
+
   if (action === "advanceRound") {
     session.closingRound = true;
     const closedSession = await writeSession(env, session);
