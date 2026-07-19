@@ -1,8 +1,9 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
-const waitingPlayerTimeoutMs = 30000;
+const waitingPlayerTimeoutMs = 90000;
 // Polling two clients through KV can be delayed or reordered, so keep disconnect detection conservative.
-const matchPlayerTimeoutMs = 10 * 60 * 1000;
+// Give mobile browsers, throttled tabs, and temporary network drops enough room to reconnect.
+const matchPlayerTimeoutMs = 20 * 60 * 1000;
 const matchHeartbeatTtlSeconds = 60 * 60;
 const matchHeartbeatKeyPrefix = "match:";
 
@@ -376,7 +377,7 @@ const handlePost = async ({ request, env }) => {
     const matchId = String(payload?.matchId ?? "");
     session.waitingPlayers = session.waitingPlayers.filter((player) => player.id !== playerId);
     const match = session.matches[matchId] ?? Object.values(session.matches).find((item) => isCurrentRoundMatch(session, item) && item.playerIds?.includes(playerId));
-    if (match?.playerIds?.includes(playerId)) {
+    if (match?.playerIds?.includes(playerId) && match.finished === true) {
       cancelMatchForDisconnect(match, playerId);
     }
     return json(await writeSession(env, session));
