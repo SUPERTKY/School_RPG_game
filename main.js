@@ -8,6 +8,7 @@ const titleMoveDurationMs = 800;
 const maxHp = 120;
 const matchingPollMs = 1500;
 const matchSyncPollMs = 2000;
+const turnHandoffWatchdogMs = 7000;
 const sessionRequestTimeoutMs = 8000;
 const sessionRetryDelayMs = 450;
 const resultReturnMs = 10000;
@@ -39,6 +40,7 @@ const passwordModes = {
 const opening = document.querySelector("#opening");
 const openingImage = document.querySelector("#openingImage");
 const openingAudio = document.querySelector("#openingAudio");
+const battleAudio = document.querySelector("#battleAudio");
 const turnStartAudio = document.querySelector("#turnStartAudio");
 const damageSmallAudio = document.querySelector("#damageSmallAudio");
 const damageMediumAudio = document.querySelector("#damageMediumAudio");
@@ -154,6 +156,8 @@ const battleState = {
   match: null,
   lastMatchVersion: -1,
   matchSyncTimerId: null,
+  turnHandoffWatchdogTimerId: null,
+  syncInFlight: false,
   matchingTimerId: null,
   rouletteRunId: 0,
   eliminatedTournamentId: Number(localStorage.getItem("schoolRpgEliminatedTournamentId") || "-1"),
@@ -261,6 +265,25 @@ const playAudioFromStart = (audioElement) => {
   if (playPromise !== undefined) {
     playPromise.catch(() => {});
   }
+};
+
+
+const stopBattleAudio = () => {
+  if (!battleAudio) {
+    return;
+  }
+
+  battleAudio.pause();
+  battleAudio.currentTime = 0;
+};
+
+const playBattleAudio = () => {
+  if (!battleAudio) {
+    return;
+  }
+
+  battleAudio.loop = true;
+  playAudioFromStart(battleAudio);
 };
 
 const playOpeningAudio = () => {
@@ -480,6 +503,8 @@ const forceReturnToTitle = (message = "最初の画面に戻りました。") =>
     battleState.matchingTimerId = null;
   }
   stopMatchSync();
+  stopTurnHandoffWatchdog();
+  stopBattleAudio();
   resetBattle();
   nextScreen.classList.remove("is-battle-starting");
   battleScene.classList.remove("is-visible");
@@ -492,6 +517,8 @@ const forceReturnToTitle = (message = "最初の画面に戻りました。") =>
 
 const showResult = async (result) => {
   battleState.phase = "finished";
+  stopTurnHandoffWatchdog();
+  stopBattleAudio();
   updateSkillButtons();
   const won = result === "win";
   const defeatedCharacter = won ? opponentCharacter : playerCharacter;
@@ -834,7 +861,31 @@ const tickCooldownsAtPlayerTurnStart = () => {
   });
 };
 
+const stopTurnHandoffWatchdog = () => {
+  if (battleState.turnHandoffWatchdogTimerId) {
+    window.clearTimeout(battleState.turnHandoffWatchdogTimerId);
+    battleState.turnHandoffWatchdogTimerId = null;
+  }
+};
+
+const armTurnHandoffWatchdog = (phase, version = battleState.lastMatchVersion) => {
+  stopTurnHandoffWatchdog();
+  if (!["opponent", "resolving"].includes(phase) || !battleState.match?.id) {
+    return;
+  }
+
+  battleState.turnHandoffWatchdogTimerId = window.setTimeout(() => {
+    battleState.turnHandoffWatchdogTimerId = null;
+    if (battleState.phase !== phase || battleState.lastMatchVersion !== version || !battleState.match?.id) {
+      return;
+    }
+    syncMatch();
+    armTurnHandoffWatchdog(phase, version);
+  }, turnHandoffWatchdogMs);
+};
+
 const startPlayerTurn = () => {
+  stopTurnHandoffWatchdog();
   battleState.phase = "player";
   battleState.playerGuardReduction = 0;
   turnLabel.src = "assets/images/ui/Icon/your_turn.png";
@@ -906,9 +957,10 @@ const applyRemoteMatch = (match) => {
 };
 
 const syncMatch = async () => {
-  if (!battleState.match?.id || battleState.phase === "finished") {
+  if (!battleState.match?.id || battleState.phase === "finished" || battleState.syncInFlight) {
     return;
   }
+  battleState.syncInFlight = true;
   try {
     const session = await postSessionAction({ action: "getMatch", playerId: battleState.playerId, matchId: battleState.match.id });
     applyRemoteSession(session);
@@ -919,6 +971,8 @@ const syncMatch = async () => {
     }
   } catch (error) {
     setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
+  } finally {
+    battleState.syncInFlight = false;
   }
 };
 
@@ -941,6 +995,7 @@ const startOpponentTurn = () => {
   turnLabel.alt = "相手の順番";
   setBattleMessage("相手の順番です。相手の操作を待っています。");
   updateSkillButtons();
+  armTurnHandoffWatchdog("opponent");
   syncMatch();
 };
 
@@ -981,6 +1036,7 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
   }
 
   battleState.phase = "resolving";
+  armTurnHandoffWatchdog("resolving");
   setBattleMessage(message);
   updateSkillButtons();
 
@@ -1009,6 +1065,7 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
       return;
     }
     setBattleMessage("操作の送信に失敗しました。もう一度同期します。");
+    armTurnHandoffWatchdog("resolving");
     await syncMatch();
   }
 };
@@ -1041,6 +1098,7 @@ const resetBattle = () => {
   battleState.match = null;
   battleState.lastMatchVersion = -1;
   battleState.rouletteRunId += 1;
+  stopTurnHandoffWatchdog();
   stopTurnRoulette();
   questionPanel.hidden = true;
   updateHpDisplay();
@@ -1075,6 +1133,7 @@ const beginMatchedBattle = async (match) => {
   setBattleMessage("参加が確定しました。順番を決めています。");
   await loadQuestions();
   battleScene.classList.add("is-visible");
+  playBattleAudio();
   const firstIsPlayer = match.firstPlayerId === battleState.playerId;
   const rouletteCompleted = await playTurnRoulette(firstIsPlayer);
   if (!rouletteCompleted || battleState.phase !== "roulette") {
@@ -1147,6 +1206,7 @@ const startBattleScene = async () => {
   matchingButton.disabled = true;
   nextScreen.classList.add("is-battle-starting");
   battleScene.classList.add("is-visible");
+  playBattleAudio();
   resetBattle();
   setBattleMessage("相手を探しています...");
   await pollMatching();
