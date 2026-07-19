@@ -1,9 +1,9 @@
 const sessionKey = "current";
 const validSubjectKeys = new Set(["math", "japanese", "english", "science", "social"]);
 const waitingPlayerTimeoutMs = 90000;
-// Active matches use heartbeat keys separate from the shared session blob.
-// Resolve only sustained absence as a forfeit so temporary KV/read delays do not end matches immediately.
-const matchPlayerTimeoutMs = 3 * 60 * 1000;
+// Polling two clients through KV can be delayed or reordered, so keep automatic absence detection conservative.
+// Explicit leave signals still resolve immediately, but heartbeat-only ghost cleanup waits long enough to avoid false disconnects.
+const matchPlayerTimeoutMs = 20 * 60 * 1000;
 const matchHeartbeatTtlSeconds = 60 * 60;
 const matchHeartbeatKeyPrefix = "match:";
 
