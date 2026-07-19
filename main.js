@@ -6,11 +6,12 @@ const titleFadeDurationMs = 1000;
 const titleMoveDelayMs = 1000;
 const titleMoveDurationMs = 800;
 const maxHp = 120;
-const matchingPollMs = 1500;
-const matchSyncPollMs = 2000;
-const turnHandoffWatchdogMs = 7000;
-const sessionRequestTimeoutMs = 8000;
-const sessionRetryDelayMs = 450;
+const matchingPollMs = 1000;
+const matchSyncPollMs = 1000;
+const turnHandoffWatchdogMs = 9000;
+const sessionRequestTimeoutMs = 12000;
+const sessionRetryDelayMs = 350;
+const sessionRetryJitterMs = 250;
 const resultReturnMs = 10000;
 const questionDurationSeconds = 20;
 const skillBonusAccuracyThreshold = 65;
@@ -400,6 +401,8 @@ const saveRemoteSession = async (session) => {
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+const getRetryDelay = (attempt) => sessionRetryDelayMs * 2 ** attempt + Math.random() * sessionRetryJitterMs;
+
 const fetchSessionJson = async (url, options = {}) => {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), sessionRequestTimeoutMs);
@@ -419,7 +422,7 @@ const fetchSessionJson = async (url, options = {}) => {
   }
 };
 
-const postSessionAction = async (payload, { retries = 1 } = {}) => {
+const postSessionAction = async (payload, { retries = 3 } = {}) => {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
@@ -434,7 +437,7 @@ const postSessionAction = async (payload, { retries = 1 } = {}) => {
       if (!canRetry || attempt === retries) {
         throw error;
       }
-      await wait(sessionRetryDelayMs * (attempt + 1));
+      await wait(getRetryDelay(attempt));
     }
   }
   throw lastError;
@@ -970,7 +973,7 @@ const syncMatch = async () => {
       forceReturnToTitle("接続が切れたため、学習セッションを終了しました。もう一度参加してください。");
     }
   } catch (error) {
-    setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
+    setBattleMessage("相手との同期に失敗しました。自動で再接続しています...");
   } finally {
     battleState.syncInFlight = false;
   }
@@ -978,6 +981,7 @@ const syncMatch = async () => {
 
 const startMatchSync = () => {
   stopMatchSync();
+  syncMatch();
   battleState.matchSyncTimerId = window.setInterval(syncMatch, matchSyncPollMs);
 };
 
@@ -1180,8 +1184,8 @@ const pollMatching = async () => {
     }
     setBattleMessage("相手を探しています。同じタイミングで参加している人とランダムに接続します。");
   } catch (error) {
-    battleState.phase = "idle";
-    setBattleMessage("参加状態の確認に失敗しました。通信を確認してください。");
+    battleState.phase = "matching";
+    setBattleMessage("参加状態の確認に失敗しました。自動で再接続しています...");
   }
 };
 
@@ -1371,6 +1375,16 @@ battleActions.addEventListener("click", (event) => {
 // pagehide also fires for mobile tab/app switches and bfcache transitions, which made
 // active players look disconnected. Only send an explicit leave signal for real unloads.
 window.addEventListener("beforeunload", notifyPlayerDisconnected);
+window.addEventListener("online", () => {
+  if (["matching", "roulette", "player", "opponent", "question", "resolving"].includes(battleState.phase)) {
+    syncMatch();
+  }
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && ["matching", "roulette", "player", "opponent", "question", "resolving"].includes(battleState.phase)) {
+    syncMatch();
+  }
+});
 
 window.addEventListener("load", async () => {
   await loadRemoteSession();
