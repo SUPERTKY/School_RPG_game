@@ -627,9 +627,12 @@ const getSessionStoreDiagnostic = async (env = {}) => {
       if (bindings[name].readWriteOk) {
         return { ok: true, activeBinding: name, bindings, consistencyWarning: kvRealtimeConsistencyWarning };
       }
+      bindings[name].readWriteError = "READ_AFTER_WRITE_MISMATCH";
     } catch (error) {
       lastError = error;
       bindings[name].readWriteOk = false;
+      bindings[name].readWriteError = error?.message ?? String(error);
+      bindings[name].readWriteErrorName = error?.name;
     }
   }
   return {

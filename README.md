@@ -50,6 +50,19 @@ Cloudflare KV は高速な読み取り向けの仕組みで、リアルタイム
 
 このリポジトリでは KV 未設定や誤バインディングを診断できるようにしていますが、診断結果が `ok: true` でも、KV の結果整合性による遅延・順序入れ替わりは設定ミスではありません。安定したリアルタイム対戦にする場合は、Cloudflare Durable Objects など、同じ試合の状態を単一の強整合な実行場所で扱える仕組みに移行してください。
 
+
+#### `readWriteOk` が `false` の場合
+
+`configured: true` かつ `isKvBinding: true` なのに `readWriteOk: false` の場合、Pages Functions から KV バインディング自体は見えていますが、診断用キーの書き込み・読み取り・削除のどこかで失敗しています。管理者画面の「KVデバッグ」または `/api/session` の `diagnoseSessionStore` 返却 JSON に `readWriteError` が出ている場合は、その内容を確認してください。
+
+よくある対応は次の通りです。
+
+1. Pages の **Settings** → **Functions** → **KV namespace bindings** で、`GAME_SESSION_KV` が現在使っている環境（Production / Preview）に設定されているか確認します。
+2. KV namespace を削除・作り直した場合は、古い binding を一度外し、新しい namespace を選び直して保存します。
+3. 設定を保存したあと、必ず再デプロイします。
+4. Preview URL を見ている場合は Preview 側、独自ドメインや本番 URL を見ている場合は Production 側の設定を確認します。
+5. `readWriteError` が Cloudflare 側のエラーを示す場合は、数分待って再デプロイ・再診断します。
+
 ### 補足
 
 - KV の「エントリー」は手動で作らなくて大丈夫です。管理者画面で「実施する」を押すと、アプリが自動で `current` というエントリーを作成・更新します。
