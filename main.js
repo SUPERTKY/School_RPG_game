@@ -26,7 +26,7 @@ const subjects = {
 const passwordModes = {
   startup: {
     title: "パスワード認証",
-    description: "ゲームを開始するにはパスワードを入力してください。",
+    description: "学習クイズを開始するにはパスワードを入力してください。",
     allowCancel: false,
   },
   admin: {
@@ -101,7 +101,7 @@ const skillButtons = Array.from(document.querySelectorAll(".battle-action"));
 
 const skills = {
   attack: {
-    name: "アタック",
+    name: "提出",
     difficulty: "normal",
     base: 8,
     perPoint: 4,
@@ -109,7 +109,7 @@ const skills = {
     cooldownTurns: 0,
   },
   recover: {
-    name: "リカバー",
+    name: "確認",
     difficulty: "normal",
     base: 6,
     perPoint: 3,
@@ -117,7 +117,7 @@ const skills = {
     cooldownTurns: 1,
   },
   guard: {
-    name: "ガード",
+    name: "保留",
     difficulty: "normal",
     base: 15,
     perPoint: 7,
@@ -126,7 +126,7 @@ const skills = {
     maxReduction: 60,
   },
   burst: {
-    name: "バースト",
+    name: "発展",
     difficulty: "hard",
     base: 16,
     perPoint: 8,
@@ -303,17 +303,17 @@ const updateAdminButtonStates = () => {
 const updateSessionUi = () => {
   const subject = getSelectedSubject();
   const statusText = battleState.hosted
-    ? `開催中: ${subject.label} / 大会${battleState.tournamentId} 第${battleState.round + 1}マッチング${battleState.closingRound ? "締め切り中" : ""}`
-    : "現在は開催していません。管理者画面で教科を選んで開催してください。";
+    ? `実施中: ${subject.label} / 実施${battleState.tournamentId} 第${battleState.round + 1}受付${battleState.closingRound ? "締め切り中" : ""}`
+    : "現在は実施していません。管理者画面で教科を選んで開始してください。";
 
   subjectLabel.textContent = `教科: ${subject.label}`;
   const isEliminated = battleState.eliminatedTournamentId === battleState.tournamentId;
   matchingButton.disabled = !battleState.hosted || isEliminated || battleState.closingRound;
-  matchingButton.title = battleState.hosted ? `${subject.label}でマッチング開始` : "";
+  matchingButton.title = battleState.hosted ? `${subject.label}で参加開始` : "";
   matchingButton.classList.toggle("is-visible", battleState.hosted && titleImage.classList.contains("is-settled"));
   if (sessionNotice) {
     sessionNotice.hidden = battleState.hosted && !isEliminated && !battleState.closingRound;
-    sessionNotice.textContent = !battleState.hosted ? "現在開催していません。管理者が開催するまで遊べません。" : isEliminated ? "一回負けたため、次の大会までマッチングできません。" : "マッチング締め切り中です。次のトーナメント開始を待ってください。";
+    sessionNotice.textContent = !battleState.hosted ? "現在実施していません。管理者が開始するまで参加できません。" : isEliminated ? "今回は終了したため、次の回まで参加できません。" : "参加受付を締め切りました。次の回の開始を待ってください。";
     sessionNotice.classList.toggle("is-visible", !sessionNotice.hidden && titleImage.classList.contains("is-settled"));
   }
   if (adminStatus) {
@@ -334,7 +334,7 @@ const applyRemoteSession = (session) => {
   battleState.round = Number.isInteger(session?.round) ? session.round : battleState.round;
   battleState.closingRound = session?.closingRound === true;
   if (wasHosted && !battleState.hosted && battleState.phase !== "idle") {
-    forceReturnToTitle("開催が終了したため、バトルを強制終了しました。");
+    forceReturnToTitle("実施が終了したため、学習セッションを終了しました。");
   }
   updateSessionUi();
 };
@@ -345,7 +345,7 @@ const loadRemoteSession = async () => {
   } catch (error) {
     updateSessionUi();
     if (sessionNotice) {
-      sessionNotice.textContent = "オンラインの開催状態を確認できません。管理者に確認してください。";
+      sessionNotice.textContent = "オンラインの実施状態を確認できません。管理者に確認してください。";
       sessionNotice.hidden = false;
       sessionNotice.classList.toggle("is-visible", titleImage.classList.contains("is-settled"));
     }
@@ -471,7 +471,7 @@ const playAnswerIcon = (isCorrect) => {
   }
 };
 
-const forceReturnToTitle = (message = "タイトルに戻りました。") => {
+const forceReturnToTitle = (message = "最初の画面に戻りました。") => {
   if (battleState.questionSession?.timerId) {
     window.clearInterval(battleState.questionSession.timerId);
   }
@@ -499,7 +499,7 @@ const showResult = async (result) => {
   defeatedCharacter.classList.add("is-falling");
   await new Promise((resolve) => window.setTimeout(resolve, 1300));
   resultImage.src = won ? "assets/images/ui/Victory.png" : "assets/images/ui/defeat.png";
-  resultImage.alt = won ? "勝利" : "敗北";
+  resultImage.alt = won ? "完了" : "終了";
   resultOverlay.hidden = false;
   playAudioFromStart(won ? victoryAudio : defeatAudio);
   if (!won) {
@@ -507,7 +507,7 @@ const showResult = async (result) => {
     localStorage.setItem("schoolRpgEliminatedTournamentId", String(battleState.tournamentId));
   }
   postSessionAction({ action: "finishMatch", playerId: battleState.playerId, matchId: battleState.match?.id, result }).catch(() => {});
-  window.setTimeout(() => forceReturnToTitle(won ? "勝利しました。" : "敗北しました。次の大会まで参加できません。"), resultReturnMs);
+  window.setTimeout(() => forceReturnToTitle(won ? "完了しました。" : "終了しました。次の実施まで参加できません。"), resultReturnMs);
 };
 
 const waitForNextPaint = () =>
@@ -689,7 +689,7 @@ const startQuestionSession = (skillKey) => {
   const questions = shuffleQuestions(getQuestionsByDifficulty(skill.difficulty));
 
   if (questions.length === 0) {
-    setBattleMessage("この技に対応する開催教科の問題がありません。questions フォルダを確認してください。");
+    setBattleMessage("この操作に対応する実施教科の問題がありません。questions フォルダを確認してください。");
     return;
   }
 
@@ -758,7 +758,7 @@ const updateSkillButtons = () => {
     button.disabled = !isPlayerTurn || cooldown > 0 || battleState.opponentHp <= 0;
     button.classList.toggle("is-on-cooldown", cooldown > 0);
     button.classList.toggle("is-unavailable", !isPlayerTurn && battleState.opponentHp > 0);
-    button.title = cooldown > 0 ? `${skills[skillKey].name}は次の自分のターンまで使えません` : skills[skillKey].name;
+    button.title = cooldown > 0 ? `${skills[skillKey].name}は次の自分の順番まで使えません` : skills[skillKey].name;
   });
 };
 
@@ -838,7 +838,7 @@ const startPlayerTurn = () => {
   battleState.phase = "player";
   battleState.playerGuardReduction = 0;
   turnLabel.src = "assets/images/ui/Icon/your_turn.png";
-  turnLabel.alt = "自分のターン";
+  turnLabel.alt = "自分の順番";
   turnLabel.classList.remove("is-entering");
   void turnLabel.offsetWidth;
   turnLabel.classList.add("is-entering");
@@ -889,7 +889,7 @@ const applyRemoteMatch = (match) => {
   if (match.finished) {
     stopMatchSync();
     if (match.disconnectReason) {
-      forceReturnToTitle("接続が切れたため、バトルを終了しました。もう一度マッチングしてください。");
+      forceReturnToTitle("接続が切れたため、学習セッションを終了しました。もう一度参加してください。");
       return;
     }
     showResult(match.winnerPlayerId === battleState.playerId ? "win" : "lose");
@@ -915,7 +915,7 @@ const syncMatch = async () => {
     if (session.match) {
       applyRemoteMatch(session.match);
     } else if (["missing", "disconnected"].includes(session.matchStatus)) {
-      forceReturnToTitle("接続が切れたため、バトルを終了しました。もう一度マッチングしてください。");
+      forceReturnToTitle("接続が切れたため、学習セッションを終了しました。もう一度参加してください。");
     }
   } catch (error) {
     setBattleMessage("相手との同期に失敗しました。再接続を待っています...");
@@ -938,8 +938,8 @@ const startOpponentTurn = () => {
   battleState.phase = "opponent";
   turnLabel.classList.remove("is-entering");
   turnLabel.src = "assets/images/ui/Icon/enemy_turn.png";
-  turnLabel.alt = "相手のターン";
-  setBattleMessage("相手のターンです。相手の操作を待っています。");
+  turnLabel.alt = "相手の順番";
+  setBattleMessage("相手の順番です。相手の操作を待っています。");
   updateSkillButtons();
   syncMatch();
 };
@@ -968,16 +968,16 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
   let guardReduction = 0;
 
   if (skill.type === "damage") {
-    message = `${skill.name}！ ${scoreText}で、相手に${effectValue}ダメージを送信。`;
+    message = `${skill.name}！ ${scoreText}で、相手のポイントを${effectValue}調整。`;
   }
 
   if (skill.type === "recover") {
-    message = `${skill.name}！ ${scoreText}で、自分のHPを${effectValue}回復送信。`;
+    message = `${skill.name}！ ${scoreText}で、自分のポイントを${effectValue}加算。`;
   }
 
   if (skill.type === "guard") {
     guardReduction = Math.min(skill.maxReduction, effectValue);
-    message = `${skill.name}！ ${scoreText}で、次に受けるダメージを${guardReduction}%軽減。`;
+    message = `${skill.name}！ ${scoreText}で、次の減点を${guardReduction}%軽減。`;
   }
 
   battleState.phase = "resolving";
@@ -1005,10 +1005,10 @@ const applySkillResult = async (skillKey, effectivePoint, correct, wrong) => {
     if (error.result?.match) {
       applyRemoteSession(error.result);
       applyRemoteMatch(error.result.match);
-      setBattleMessage(error.result.matchStatus === "versionMismatch" ? "相手との状態を更新しました。もう一度操作してください。" : "現在は自分のターンではありません。");
+      setBattleMessage(error.result.matchStatus === "versionMismatch" ? "相手との状態を更新しました。もう一度操作してください。" : "現在は自分の順番ではありません。");
       return;
     }
-    setBattleMessage("技の送信に失敗しました。もう一度同期します。");
+    setBattleMessage("操作の送信に失敗しました。もう一度同期します。");
     await syncMatch();
   }
 };
@@ -1072,7 +1072,7 @@ const beginMatchedBattle = async (match) => {
     battleState.matchingTimerId = null;
   }
   battleState.phase = "roulette";
-  setBattleMessage("マッチングしました！ 先攻・後攻を決めています。");
+  setBattleMessage("参加が確定しました。順番を決めています。");
   await loadQuestions();
   battleScene.classList.add("is-visible");
   const firstIsPlayer = match.firstPlayerId === battleState.playerId;
@@ -1101,15 +1101,15 @@ const pollMatching = async () => {
     }
     applyRemoteSession(session);
     if (session.matchStatus === "eliminated") {
-      forceReturnToTitle("一回負けたため、次の大会までマッチングできません。");
+      forceReturnToTitle("今回は終了したため、次の回まで参加できません。");
       return;
     }
     if (session.matchStatus === "closed") {
-      forceReturnToTitle("現在開催していません。");
+      forceReturnToTitle("現在実施していません。");
       return;
     }
     if (session.matchStatus === "matchedPending") {
-      setBattleMessage("マッチングしました！ 相手の準備完了を待っています。");
+      setBattleMessage("参加が確定しました。相手の準備完了を待っています。");
     }
     if (session.matchStatus === "matched" && session.match) {
       if (battleState.matchingTimerId) {
@@ -1119,10 +1119,10 @@ const pollMatching = async () => {
       await beginMatchedBattle(session.match);
       return;
     }
-    setBattleMessage("相手を探しています。同じタイミングで探している人とランダムにマッチングします。");
+    setBattleMessage("相手を探しています。同じタイミングで参加している人とランダムに接続します。");
   } catch (error) {
     battleState.phase = "idle";
-    setBattleMessage("マッチング状態の確認に失敗しました。通信を確認してください。");
+    setBattleMessage("参加状態の確認に失敗しました。通信を確認してください。");
   }
 };
 
@@ -1132,15 +1132,15 @@ const startBattleScene = async () => {
   }
 
   if (!battleState.hosted) {
-    setBattleMessage("管理者がゲームを開催するまで遊べません。");
+    setBattleMessage("管理者が学習クイズを開始するまで参加できません。");
     return;
   }
   if (battleState.eliminatedTournamentId === battleState.tournamentId) {
-    setBattleMessage("一回負けたため、次の大会までマッチングできません。");
+    setBattleMessage("今回は終了したため、次の回まで参加できません。");
     return;
   }
   if (battleState.closingRound) {
-    setBattleMessage("マッチング締め切り中です。次の開始を待ってください。");
+    setBattleMessage("参加受付を締め切りました。次の開始を待ってください。");
     return;
   }
 
@@ -1198,14 +1198,14 @@ adminGameForm.addEventListener("submit", async (event) => {
   battleState.selectedSubjectKey = subjects[nextSubjectKey] ? nextSubjectKey : "math";
   battleState.adminBusy = true;
   updateAdminButtonStates();
-  adminStatus.textContent = "オンラインに開催状態を保存しています...";
+  adminStatus.textContent = "オンラインに実施状態を保存しています...";
   let failed = false;
   try {
     await saveRemoteSession({ hosted: true, selectedSubjectKey: battleState.selectedSubjectKey });
     await loadQuestions();
   } catch (error) {
     failed = true;
-    adminStatus.textContent = getSessionErrorMessage(error, "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
+    adminStatus.textContent = getSessionErrorMessage(error, "実施状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
   } finally {
     battleState.adminBusy = false;
     if (failed) {
@@ -1224,13 +1224,13 @@ adminStopButton.addEventListener("click", async () => {
 
   battleState.adminBusy = true;
   updateAdminButtonStates();
-  adminStatus.textContent = "オンラインに開催終了を保存しています...";
+  adminStatus.textContent = "オンラインに実施終了を保存しています...";
   let failed = false;
   try {
     await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
   } catch (error) {
     failed = true;
-    adminStatus.textContent = getSessionErrorMessage(error, "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
+    adminStatus.textContent = getSessionErrorMessage(error, "実施終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
   } finally {
     battleState.adminBusy = false;
     if (failed) {
@@ -1249,14 +1249,14 @@ adminRoundButton.addEventListener("click", async () => {
 
   battleState.adminBusy = true;
   updateAdminButtonStates();
-  const nextRoundLabel = battleState.round === 0 ? "トーナメント2次開始" : `トーナメント${battleState.round + 2}次開始`;
+  const nextRoundLabel = battleState.round === 0 ? "第2回開始" : `第${battleState.round + 2}回開始`;
   adminStatus.textContent = `5秒後に${nextRoundLabel}に進みます...`;
   try {
     await postSessionAction({ action: "advanceRound", adminPassword: authState.adminPassword });
     adminRoundButton.textContent = nextRoundLabel;
     await loadRemoteSession();
   } catch (error) {
-    adminStatus.textContent = "トーナメント進行に失敗しました。";
+    adminStatus.textContent = "回進行に失敗しました。";
   } finally {
     battleState.adminBusy = false;
     updateAdminButtonStates();
@@ -1266,15 +1266,15 @@ adminRoundButton.addEventListener("click", async () => {
 
 adminResetTournamentButton.addEventListener("click", async () => {
   adminResetTournamentButton.disabled = true;
-  adminStatus.textContent = "大会番号をリセットしています...";
+  adminStatus.textContent = "実施番号をリセットしています...";
   try {
     await postSessionAction({ action: "resetTournamentNumber", adminPassword: authState.adminPassword });
     localStorage.removeItem("schoolRpgEliminatedTournamentId");
     battleState.eliminatedTournamentId = -1;
-    adminRoundButton.textContent = "大会最初のマッチング締め切り";
+    adminRoundButton.textContent = "最初の参加受付締め切り";
     await loadRemoteSession();
   } catch (error) {
-    adminStatus.textContent = "大会番号のリセットに失敗しました。";
+    adminStatus.textContent = "実施番号のリセットに失敗しました。";
   } finally {
     adminResetTournamentButton.disabled = false;
   }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>School RPG Game</title>
+    <title>School Study Quiz</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
   </head>
@@ -25,40 +25,40 @@
           src="assets/images/ui/Title.png"
           alt="Title"
         />
-        <button id="matchingButton" class="matching-button" type="button" aria-label="マッチング開始">
-          <img src="assets/images/ui/Matching_Button.png" alt="マッチング" />
+        <button id="matchingButton" class="matching-button" type="button" aria-label="参加受付開始">
+          <img src="assets/images/ui/Matching_Button.png" alt="参加受付" />
         </button>
-        <p id="sessionNotice" class="session-notice" hidden>現在開催していません。管理者が開催するまで遊べません。</p>
+        <p id="sessionNotice" class="session-notice" hidden>現在実施していません。管理者が開始するまで参加できません。</p>
         <button id="adminButton" class="admin-button" type="button" aria-label="管理者画面を開く">
           <img src="assets/images/ui/Administrator.png" alt="管理者" />
         </button>
         <section id="adminScreen" class="admin-screen" aria-label="管理者画面" hidden>
           <div class="admin-screen__panel">
             <h1>管理者画面</h1>
-            <p>開催する教科を選ぶと、タイトルのマッチングから遊べるようになります。</p>
+            <p>実施する教科を選ぶと、タイトルの参加ボタンから利用できるようになります。</p>
             <form id="adminGameForm" class="admin-screen__form">
               <fieldset class="admin-screen__subjects">
-                <legend>開催する教科</legend>
+                <legend>実施する教科</legend>
                 <label><input type="radio" name="subject" value="math" checked /> 数学</label>
                 <label><input type="radio" name="subject" value="japanese" /> 国語</label>
                 <label><input type="radio" name="subject" value="english" /> 英語</label>
                 <label><input type="radio" name="subject" value="science" /> 理科</label>
                 <label><input type="radio" name="subject" value="social" /> 社会</label>
               </fieldset>
-              <p id="adminStatus" class="admin-screen__status">現在は開催していません。</p>
+              <p id="adminStatus" class="admin-screen__status">現在は実施していません。</p>
               <div class="admin-screen__actions">
-                <button id="adminHostButton" class="admin-screen__host" type="submit">この教科で開催する</button>
-                <button id="adminStopButton" class="admin-screen__stop" type="button">開催を終了する</button>
-                <button id="adminRoundButton" class="admin-screen__round" type="button">大会最初のマッチング締め切り</button>
-                <button id="adminResetTournamentButton" class="admin-screen__reset" type="button">大会番号リセット</button>
+                <button id="adminHostButton" class="admin-screen__host" type="submit">この教科で開始する</button>
+                <button id="adminStopButton" class="admin-screen__stop" type="button">実施を終了する</button>
+                <button id="adminRoundButton" class="admin-screen__round" type="button">最初の参加受付締め切り</button>
+                <button id="adminResetTournamentButton" class="admin-screen__reset" type="button">実施番号リセット</button>
                 <button id="adminBackButton" class="admin-screen__back" type="button">タイトルへ戻る</button>
               </div>
             </form>
           </div>
         </section>
-        <div id="battleScene" class="battle-scene" aria-label="バトルシーン">
-          <div class="battle-hud" aria-label="HPとターン情報">
-            <div class="hp-display hp-display--player" aria-label="プレイヤーの体力">
+        <div id="battleScene" class="battle-scene" aria-label="学習セッション">
+          <div class="battle-hud" aria-label="進行状況と順番情報">
+            <div class="hp-display hp-display--player" aria-label="自分の達成度">
               <div class="hp-display__art" aria-hidden="true">
                 <span class="hp-display__gauge" id="playerHpGauge">
                   <img class="hp-display__gauge-image" src="assets/images/ui/HP_gauge.png" alt="" />
@@ -73,11 +73,11 @@
                 id="turnLabel"
                 class="turn-panel__label"
                 src="assets/images/ui/Icon/your_turn.png"
-                alt="自分のターン"
+                alt="自分の順番"
               />
               <span id="subjectLabel" class="turn-panel__subject">教科: 数学</span>
             </div>
-            <div class="hp-display hp-display--opponent" aria-label="相手の体力">
+            <div class="hp-display hp-display--opponent" aria-label="相手の達成度">
               <div class="hp-display__art" aria-hidden="true">
                 <span class="hp-display__gauge" id="opponentHpGauge">
                   <img class="hp-display__gauge-image" src="assets/images/ui/HP_gauge.png" alt="" />
@@ -88,7 +88,7 @@
               <span id="opponentHpText" class="hp-display__value">120 / 120</span>
             </div>
           </div>
-          <p id="battleMessage" class="battle-message">バトル開始を待っています。</p>
+          <p id="battleMessage" class="battle-message">学習セッション開始を待っています。</p>
           <section id="questionPanel" class="question-panel" aria-label="問題" hidden>
             <div class="question-panel__header">
               <span id="questionTimer">残り20秒</span>
@@ -102,7 +102,7 @@
           <img
             class="battle-character battle-character--player"
             src="assets/images/characters/player_default.png"
-            alt="プレイヤー"
+            alt="自分"
           />
           <div id="playerGuardOverlay" class="guard-overlay" aria-hidden="true">
             <img class="guard-overlay__image" src="assets/images/ui/guard.png" alt="" />
@@ -117,18 +117,18 @@
             <img class="guard-overlay__image" src="assets/images/ui/guard.png" alt="" />
             <span id="opponentGuardValue" class="guard-overlay__value">0%</span>
           </div>
-          <div id="battleActions" class="battle-actions" aria-label="技アイコン">
-            <button class="battle-action" type="button" data-skill="recover" aria-label="リカバーを使う">
-              <img src="assets/images/ui/Icon/Battle_Icon/recover_icon.png" alt="リカバー" />
+          <div id="battleActions" class="battle-actions" aria-label="操作アイコン">
+            <button class="battle-action" type="button" data-skill="recover" aria-label="確認を使う">
+              <img src="assets/images/ui/Icon/Battle_Icon/recover_icon.png" alt="確認" />
             </button>
-            <button class="battle-action" type="button" data-skill="guard" aria-label="ガードを使う">
-              <img src="assets/images/ui/Icon/Battle_Icon/guard_icon.png" alt="ガード" />
+            <button class="battle-action" type="button" data-skill="guard" aria-label="保留を使う">
+              <img src="assets/images/ui/Icon/Battle_Icon/guard_icon.png" alt="保留" />
             </button>
-            <button class="battle-action" type="button" data-skill="burst" aria-label="バーストを使う">
-              <img src="assets/images/ui/Icon/Battle_Icon/burst_icon.png" alt="バースト" />
+            <button class="battle-action" type="button" data-skill="burst" aria-label="発展を使う">
+              <img src="assets/images/ui/Icon/Battle_Icon/burst_icon.png" alt="発展" />
             </button>
-            <button class="battle-action" type="button" data-skill="attack" aria-label="アタックを使う">
-              <img src="assets/images/ui/Icon/Battle_Icon/attack_icon.png" alt="アタック" />
+            <button class="battle-action" type="button" data-skill="attack" aria-label="提出を使う">
+              <img src="assets/images/ui/Icon/Battle_Icon/attack_icon.png" alt="提出" />
             </button>
           </div>
         <div id="turnRoulette" class="turn-roulette" aria-hidden="true" hidden>
@@ -143,7 +143,7 @@
       <section id="passwordGate" class="password-gate" aria-label="パスワード入力画面">
         <form id="passwordForm" class="password-gate__panel">
           <h1 id="passwordTitle">パスワード認証</h1>
-          <p id="passwordDescription">ゲームを開始するにはパスワードを入力してください。</p>
+          <p id="passwordDescription">学習クイズを開始するにはパスワードを入力してください。</p>
           <label class="password-gate__label" for="passwordInput">パスワード</label>
           <input id="passwordInput" class="password-gate__input" name="password" type="password" autocomplete="current-password" required />
           <p id="passwordError" class="password-gate__error" aria-live="assertive"></p>
