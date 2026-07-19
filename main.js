@@ -168,6 +168,13 @@ const battleState = {
 localStorage.setItem("schoolRpgPlayerId", battleState.playerId);
 let answerIconTimerId = null;
 
+const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
+const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
+const rouletteImages = [yourTurnImage, enemyTurnImage];
+const rouletteStepCount = 18;
+const rouletteStepMs = 120;
+const rouletteFinalPauseMs = 650;
+
 const setPasswordMode = (mode) => {
   authState.mode = mode;
   const modeConfig = passwordModes[mode];
@@ -328,6 +335,17 @@ const loadRemoteSession = async () => {
   }
 };
 
+
+const sessionErrorMessages = {
+  GAME_SESSION_KV_NOT_CONFIGURED: "GAME_SESSION_KV が未設定です。Cloudflare Pages の KV namespace bindings に同名の KV バインディングを追加してください。",
+  GAME_SESSION_KV_IS_NOT_KV_BINDING: "GAME_SESSION_KV が通常の環境変数として設定されています。Environment variables ではなく KV namespace bindings に設定してください。",
+  GAME_SESSION_IS_NOT_KV_BINDING: "GAME_SESSION が通常の環境変数として設定されています。Environment variables ではなく KV namespace bindings に設定してください。",
+  GAME_SESSION_KV_WRITE_FAILED: "GAME_SESSION_KV への書き込みが失敗しました。KV namespace のバインディング先、Pages の再デプロイ、Cloudflare 側の一時障害を確認してください。",
+  SESSION_TEMPORARILY_UNAVAILABLE: "セッション保存処理で一時的なエラーが発生しました。再試行しても直らない場合は管理者に確認してください。",
+};
+
+const getSessionErrorMessage = (error, fallback) => sessionErrorMessages[error?.result?.error] ?? fallback;
+
 const saveRemoteSession = async (session) => {
   applyRemoteSession(
     await fetchSessionJson(sessionEndpoint, {
@@ -349,7 +367,7 @@ const fetchSessionJson = async (url, options = {}) => {
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     const result = await response.json().catch(() => null);
-    if (!response.ok) {
+    if (!response.ok || result?.ok === false) {
       const error = new Error(`セッション通信に失敗しました: ${response.status}`);
       error.result = result;
       error.status = response.status;
@@ -475,37 +493,53 @@ const showResult = async (result) => {
   window.setTimeout(() => forceReturnToTitle(won ? "勝利しました。" : "敗北しました。次の大会まで参加できません。"), resultReturnMs);
 };
 
-const playTurnRoulette = async (firstIsPlayer) => {
-  const rouletteRunId = battleState.rouletteRunId + 1;
-  battleState.rouletteRunId = rouletteRunId;
-  turnLabel.classList.add("is-hidden-before-start");
-  turnRoulette.hidden = false;
-  turnRoulette.classList.add("is-playing");
-  const yourTurnImage = "assets/images/ui/Icon/your_turn.png";
-  const enemyTurnImage = "assets/images/ui/Icon/enemy_turn.png";
-  const rouletteImages = [yourTurnImage, enemyTurnImage];
-  const finalImage = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+const waitForNextPaint = () =>
+  new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
 
-  for (let step = 0; step < 18; step += 1) {
-    if (battleState.rouletteRunId !== rouletteRunId) {
-      turnRoulette.classList.remove("is-playing");
-      turnRoulette.hidden = true;
-      return false;
-    }
-    turnRouletteImage.src = rouletteImages[step % rouletteImages.length];
-    await new Promise((resolve) => window.setTimeout(resolve, 120));
-  }
+const preloadTurnRouletteImages = () => {
+  rouletteImages.forEach((src) => {
+    const image = new Image();
+    image.src = src;
+  });
+};
 
-  if (battleState.rouletteRunId !== rouletteRunId) {
-    turnRoulette.classList.remove("is-playing");
-    turnRoulette.hidden = true;
-    return false;
-  }
-  turnRouletteImage.src = finalImage;
-  await new Promise((resolve) => window.setTimeout(resolve, 650));
+const stopTurnRoulette = () => {
   turnRoulette.classList.remove("is-playing");
   turnRoulette.hidden = true;
   turnLabel.classList.remove("is-hidden-before-start");
+};
+
+const playTurnRoulette = async (firstIsPlayer) => {
+  const rouletteRunId = battleState.rouletteRunId + 1;
+  battleState.rouletteRunId = rouletteRunId;
+  const finalImage = firstIsPlayer ? yourTurnImage : enemyTurnImage;
+
+  preloadTurnRouletteImages();
+  turnLabel.classList.add("is-hidden-before-start");
+  turnRouletteImage.src = rouletteImages[0];
+  turnRoulette.hidden = false;
+  turnRoulette.classList.add("is-playing");
+  await waitForNextPaint();
+
+  for (let step = 1; step <= rouletteStepCount; step += 1) {
+    if (battleState.rouletteRunId !== rouletteRunId) {
+      stopTurnRoulette();
+      return false;
+    }
+    turnRouletteImage.src = rouletteImages[step % rouletteImages.length];
+    await wait(rouletteStepMs);
+    await waitForNextPaint();
+  }
+
+  if (battleState.rouletteRunId !== rouletteRunId) {
+    stopTurnRoulette();
+    return false;
+  }
+  turnRouletteImage.src = finalImage;
+  await wait(rouletteFinalPauseMs);
+  stopTurnRoulette();
   return true;
 };
 
@@ -969,9 +1003,7 @@ const resetBattle = () => {
   battleState.match = null;
   battleState.lastMatchVersion = -1;
   battleState.rouletteRunId += 1;
-  turnRoulette.classList.remove("is-playing");
-  turnRoulette.hidden = true;
-  turnLabel.classList.remove("is-hidden-before-start");
+  stopTurnRoulette();
   questionPanel.hidden = true;
   updateHpDisplay();
   updateGuardOverlay();
@@ -1124,7 +1156,7 @@ adminGameForm.addEventListener("submit", async (event) => {
     await saveRemoteSession({ hosted: true, selectedSubjectKey: battleState.selectedSubjectKey });
     await loadQuestions();
   } catch (error) {
-    adminStatus.textContent = "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+    adminStatus.textContent = getSessionErrorMessage(error, "開催状態の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
   } finally {
     adminHostButton.disabled = false;
   }
@@ -1136,7 +1168,7 @@ adminStopButton.addEventListener("click", async () => {
   try {
     await saveRemoteSession({ hosted: false, selectedSubjectKey: battleState.selectedSubjectKey });
   } catch (error) {
-    adminStatus.textContent = "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。";
+    adminStatus.textContent = getSessionErrorMessage(error, "開催終了の保存に失敗しました。Cloudflare の GAME_SESSION_KV と ADMIN_PASSWORD を確認してください。");
   } finally {
     adminStopButton.disabled = false;
   }
