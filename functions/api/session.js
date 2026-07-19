@@ -44,18 +44,19 @@ const isKvStore = (value) => typeof value?.get === "function" && typeof value?.p
 
 const getConfiguredBindingNames = (env = {}) => kvBindingNames.filter((name) => env[name] !== undefined && env[name] !== null);
 
-const getSessionStore = (env = {}) => {
+const getSessionStores = (env = {}) => {
   const configuredBindingNames = getConfiguredBindingNames(env);
-  const validBindingName = configuredBindingNames.find((name) => isKvStore(env[name]));
-  if (validBindingName) {
-    return env[validBindingName];
+  const stores = configuredBindingNames.filter((name) => isKvStore(env[name])).map((name) => ({ name, store: env[name] }));
+  if (stores.length > 0) {
+    return stores;
   }
 
   if (configuredBindingNames.length > 0) {
     throw new SessionStoreError(`${configuredBindingNames[0]}_IS_NOT_KV_BINDING`);
   }
-  return null;
+  return [];
 };
+
 
 const normalizeSession = (session) => ({
   hosted: session?.hosted === true,
@@ -79,30 +80,33 @@ const normalizeSession = (session) => ({
 });
 
 const readSession = async (env) => {
-  let store;
+  let stores;
   try {
-    store = getSessionStore(env);
+    stores = getSessionStores(env);
   } catch {
     return memorySession;
   }
-  if (!store) {
+  if (stores.length === 0) {
     return memorySession;
   }
 
-  try {
-    const savedSession = await store.get(sessionKey, "json");
-    return normalizeSession(savedSession);
-  } catch {
-    // If KV is temporarily unavailable or contains malformed JSON, keep /api/session usable.
-    return memorySession;
+  for (const { store } of stores) {
+    try {
+      const savedSession = await store.get(sessionKey, "json");
+      return normalizeSession(savedSession);
+    } catch {
+      // Try the next compatible binding before falling back to isolate memory.
+    }
   }
+  // If KV is temporarily unavailable or contains malformed JSON, keep /api/session usable.
+  return memorySession;
 };
 
 const writeSession = async (env, session, { requireStoreWrite = false } = {}) => {
   const nextSession = normalizeSession({ ...session, updatedAt: Date.now() });
-  let store;
+  let stores;
   try {
-    store = getSessionStore(env);
+    stores = getSessionStores(env);
   } catch (error) {
     if (requireStoreWrite) {
       throw error;
@@ -110,16 +114,21 @@ const writeSession = async (env, session, { requireStoreWrite = false } = {}) =>
     memorySession = nextSession;
     return nextSession;
   }
-  if (store) {
-    try {
-      await store.put(sessionKey, JSON.stringify(nextSession));
-    } catch (error) {
-      if (requireStoreWrite) {
-        throw new SessionStoreError("GAME_SESSION_KV_WRITE_FAILED", error?.message);
+  if (stores.length > 0) {
+    let lastError;
+    for (const { store } of stores) {
+      try {
+        await store.put(sessionKey, JSON.stringify(nextSession));
+        return nextSession;
+      } catch (error) {
+        lastError = error;
       }
-      // Fall back to isolate memory instead of surfacing a 500 to clients during a match.
-      memorySession = nextSession;
     }
+    if (requireStoreWrite) {
+      throw new SessionStoreError("GAME_SESSION_KV_WRITE_FAILED", lastError?.message);
+    }
+    // Fall back to isolate memory instead of surfacing a 500 to clients during a match.
+    memorySession = nextSession;
   } else {
     if (requireStoreWrite) {
       throw new SessionStoreError("GAME_SESSION_KV_NOT_CONFIGURED");
@@ -131,32 +140,35 @@ const writeSession = async (env, session, { requireStoreWrite = false } = {}) =>
 
 
 const deleteMatchHeartbeats = async (env, { cursor, limit = 100 } = {}) => {
-  let store;
+  let stores;
   try {
-    store = getSessionStore(env);
+    stores = getSessionStores(env);
   } catch {
-    return { deletedCount: 0, cursor: undefined, complete: true };
-  }
-  if (!store?.list || !store?.delete) {
     return { deletedCount: 0, cursor: undefined, complete: true };
   }
 
   const safeLimit = Math.max(1, Math.min(100, Math.round(normalizeNumber(limit, 100))));
-  try {
-    const result = await store.list({ prefix: matchHeartbeatKeyPrefix, cursor, limit: safeLimit });
-    const keys = Array.isArray(result?.keys) ? result.keys : [];
-    for (const key of keys) {
-      await store.delete(key.name);
+  for (const { store } of stores) {
+    if (!store?.list || !store?.delete) {
+      continue;
     }
-    return {
-      deletedCount: keys.length,
-      cursor: result?.list_complete ? undefined : result?.cursor,
-      complete: result?.list_complete === true || !result?.cursor,
-    };
-  } catch {
-    // Cleanup is best-effort; do not block tournament administration if KV listing/deletion fails.
-    return { deletedCount: 0, cursor, complete: false };
+    try {
+      const result = await store.list({ prefix: matchHeartbeatKeyPrefix, cursor, limit: safeLimit });
+      const keys = Array.isArray(result?.keys) ? result.keys : [];
+      for (const key of keys) {
+        await store.delete(key.name);
+      }
+      return {
+        deletedCount: keys.length,
+        cursor: result?.list_complete ? undefined : result?.cursor,
+        complete: result?.list_complete === true || !result?.cursor,
+      };
+    } catch {
+      // Try the next compatible binding before treating cleanup as incomplete.
+    }
   }
+  // Cleanup is best-effort; do not block tournament administration if KV listing/deletion fails.
+  return { deletedCount: 0, cursor, complete: false };
 };
 
 const maxHp = 120;
@@ -194,38 +206,46 @@ const touchMatchPlayer = (match, playerId, now = Date.now()) => {
 
 const writeMatchHeartbeat = async (env, match, playerId, now = Date.now()) => {
   touchMatchPlayer(match, playerId, now);
-  let store;
+  let stores;
   try {
-    store = getSessionStore(env);
+    stores = getSessionStores(env);
   } catch {
-    store = null;
+    stores = [];
   }
-  if (store && match?.id && playerId) {
-    try {
-      await store.put(getMatchHeartbeatKey(match.id, playerId), String(now), { expirationTtl: matchHeartbeatTtlSeconds });
-    } catch {
-      // A heartbeat is only a liveness hint; never fail the battle sync because it could not be saved.
+  if (match?.id && playerId) {
+    for (const { store } of stores) {
+      try {
+        await store.put(getMatchHeartbeatKey(match.id, playerId), String(now), { expirationTtl: matchHeartbeatTtlSeconds });
+        return;
+      } catch {
+        // Try the next compatible binding before ignoring this liveness hint.
+      }
     }
   }
 };
 
 const readMatchHeartbeat = async (env, match, playerId) => {
-  let store;
+  let stores;
   try {
-    store = getSessionStore(env);
+    stores = getSessionStores(env);
   } catch {
-    store = null;
+    stores = [];
   }
-  if (!store || !match?.id || !playerId) {
+  if (stores.length === 0 || !match?.id || !playerId) {
     return match.lastSeenByPlayerId?.[playerId];
   }
-  try {
-    const savedValue = await store.get(getMatchHeartbeatKey(match.id, playerId));
-    const savedLastSeen = savedValue === null ? NaN : Number(savedValue);
-    return Number.isFinite(savedLastSeen) ? savedLastSeen : match.lastSeenByPlayerId?.[playerId];
-  } catch {
-    return match.lastSeenByPlayerId?.[playerId];
+  for (const { store } of stores) {
+    try {
+      const savedValue = await store.get(getMatchHeartbeatKey(match.id, playerId));
+      const savedLastSeen = savedValue === null ? NaN : Number(savedValue);
+      if (Number.isFinite(savedLastSeen)) {
+        return savedLastSeen;
+      }
+    } catch {
+      // Try the next compatible binding before falling back to the session copy.
+    }
   }
+  return match.lastSeenByPlayerId?.[playerId];
 };
 
 const finishMatchByForfeit = (session, match, forfeitingPlayerId, now = Date.now()) => {
@@ -495,7 +515,7 @@ const handlePost = async ({ request, env }) => {
   }
 
   if (action === "diagnoseSessionStore") {
-    return json({ ...session, ...getSessionStoreDiagnostic(env) });
+    return json({ ...session, ...(await getSessionStoreDiagnostic(env)) });
   }
 
   if (action === "cleanupMatchHeartbeats") {
@@ -563,7 +583,7 @@ const getPublicErrorCode = (error) => {
   return "SESSION_TEMPORARILY_UNAVAILABLE";
 };
 
-const getSessionStoreDiagnostic = (env = {}) => {
+const getSessionStoreDiagnostic = async (env = {}) => {
   const bindings = Object.fromEntries(
     kvBindingNames.map((name) => [
       name,
@@ -574,15 +594,33 @@ const getSessionStoreDiagnostic = (env = {}) => {
     ]),
   );
 
+  let stores;
   try {
-    const store = getSessionStore(env);
-    if (!store) {
-      return { ok: false, error: "GAME_SESSION_KV_NOT_CONFIGURED", bindings };
-    }
-    return { ok: true, bindings };
+    stores = getSessionStores(env);
   } catch (error) {
     return { ok: false, error: getPublicErrorCode(error), bindings };
   }
+  if (stores.length === 0) {
+    return { ok: false, error: "GAME_SESSION_KV_NOT_CONFIGURED", bindings };
+  }
+
+  const diagnosticKey = `diagnostic:${crypto.randomUUID?.() ?? Date.now()}`;
+  let lastError;
+  for (const { name, store } of stores) {
+    try {
+      await store.put(diagnosticKey, "ok", { expirationTtl: 60 });
+      const savedValue = await store.get(diagnosticKey);
+      await store.delete?.(diagnosticKey);
+      bindings[name].readWriteOk = savedValue === "ok";
+      if (bindings[name].readWriteOk) {
+        return { ok: true, activeBinding: name, bindings };
+      }
+    } catch (error) {
+      lastError = error;
+      bindings[name].readWriteOk = false;
+    }
+  }
+  return { ok: false, error: "GAME_SESSION_KV_WRITE_FAILED", message: lastError?.message, bindings };
 };
 
 export async function onRequestPost(context) {
