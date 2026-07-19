@@ -333,6 +333,8 @@ const sessionErrorMessages = {
   GAME_SESSION_KV_NOT_CONFIGURED: "GAME_SESSION_KV が未設定です。Cloudflare Pages の KV namespace bindings に同名の KV バインディングを追加してください。",
   GAME_SESSION_KV_IS_NOT_KV_BINDING: "GAME_SESSION_KV が通常の環境変数として設定されています。Environment variables ではなく KV namespace bindings に設定してください。",
   GAME_SESSION_IS_NOT_KV_BINDING: "GAME_SESSION が通常の環境変数として設定されています。Environment variables ではなく KV namespace bindings に設定してください。",
+  GAME_SESSION_KV_WRITE_FAILED: "GAME_SESSION_KV への書き込みが失敗しました。KV namespace のバインディング先、Pages の再デプロイ、Cloudflare 側の一時障害を確認してください。",
+  SESSION_TEMPORARILY_UNAVAILABLE: "セッション保存処理で一時的なエラーが発生しました。再試行しても直らない場合は管理者に確認してください。",
 };
 
 const getSessionErrorMessage = (error, fallback) => sessionErrorMessages[error?.result?.error] ?? fallback;
@@ -358,7 +360,7 @@ const fetchSessionJson = async (url, options = {}) => {
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     const result = await response.json().catch(() => null);
-    if (!response.ok) {
+    if (!response.ok || result?.ok === false) {
       const error = new Error(`セッション通信に失敗しました: ${response.status}`);
       error.result = result;
       error.status = response.status;

@@ -110,14 +110,14 @@ const writeSession = async (env, session, { requireStoreWrite = false } = {}) =>
       await store.put(sessionKey, JSON.stringify(nextSession));
     } catch (error) {
       if (requireStoreWrite) {
-        throw error;
+        throw new SessionStoreError("GAME_SESSION_KV_WRITE_FAILED", error?.message);
       }
       // Fall back to isolate memory instead of surfacing a 500 to clients during a match.
       memorySession = nextSession;
     }
   } else {
     if (requireStoreWrite) {
-      throw new Error("GAME_SESSION_KV_NOT_CONFIGURED");
+      throw new SessionStoreError("GAME_SESSION_KV_NOT_CONFIGURED");
     }
     memorySession = nextSession;
   }
@@ -472,6 +472,10 @@ const handlePost = async ({ request, env }) => {
     return adminCheck.response;
   }
 
+  if (action === "diagnoseSessionStore") {
+    return json({ ...session, ...getSessionStoreDiagnostic(env) });
+  }
+
   if (action === "cleanupMatchHeartbeats") {
     const cleanup = await deleteMatchHeartbeats(env, { cursor: payload?.cursor, limit: payload?.limit });
     return json({ ...session, heartbeatKeysDeleted: cleanup.deletedCount, cleanupCursor: cleanup.cursor, cleanupComplete: cleanup.complete });
@@ -534,19 +538,25 @@ const getPublicErrorCode = (error) => {
   if (error instanceof SessionStoreError) {
     return error.code;
   }
-  if (error?.message === "GAME_SESSION_KV_NOT_CONFIGURED") {
-    return error.message;
-  }
   return "SESSION_TEMPORARILY_UNAVAILABLE";
+};
+
+const getSessionStoreDiagnostic = (env = {}) => {
+  try {
+    const store = getSessionStore(env);
+    if (!store) {
+      return { ok: false, error: "GAME_SESSION_KV_NOT_CONFIGURED" };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: getPublicErrorCode(error) };
+  }
 };
 
 export async function onRequestPost(context) {
   try {
     return await handlePost(context);
   } catch (error) {
-    return json(
-      { ...(await readSession(context?.env)), ok: false, error: getPublicErrorCode(error) },
-      { status: 500 },
-    );
+    return json({ ...(await readSession(context?.env)), ok: false, error: getPublicErrorCode(error) });
   }
 }
