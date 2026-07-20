@@ -726,10 +726,18 @@ const getSessionStoreDiagnostic = async (env = {}) => {
 
 export async function onRequestPost(context) {
   try {
-    const durableObjectResponse = await forwardToDurableObject(context.request, context.env);
+    const durableObjectResponse = await forwardToDurableObject(context.request.clone(), context.env);
     if (durableObjectResponse) {
       return durableObjectResponse;
     }
+  } catch {
+    // Keep POST actions usable when a configured Durable Object namespace still
+    // points at an old/template Worker that does not implement fetch(). The
+    // original request body is preserved by forwarding a clone above, so the
+    // Pages Function can continue with the KV or in-memory fallback below.
+  }
+
+  try {
     return await handlePost(context);
   } catch (error) {
     return json({ ...(await readSession(context?.env)), ok: false, error: getPublicErrorCode(error) });
