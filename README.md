@@ -60,13 +60,6 @@ KV を使う場合は **Settings** → **Functions** → **KV namespace bindings
 - `GAME_SESSION_STORE_NOT_CONFIGURED` の場合は `GAME_SESSION_DO` または `GAME_SESSION_KV` の binding が Pages に設定されていません。
 - `readWriteOk: false` の場合は、対象 binding の選択、Production / Preview の環境差、設定保存後の再デプロイを確認してください。
 
-
-### KV の無料枠を超えた場合
-
-`readWriteError` に `KV put() limit exceeded for the day.` と出た場合は、Cloudflare Workers KV の1日あたりの書き込み回数を使い切っています。この状態では、その日の上限がリセットされるまで KV への追加書き込みは失敗します。対処として、リセットを待つ、Workers Paid plan へ変更する、またはリアルタイム同期を Durable Objects など KV 以外へ移行してください。
-
-このアプリでは無料枠を消費しにくくするため、参加待機中の再ポーリングと対戦中の通常同期では不要な KV 書き込みを避け、対戦中の heartbeat 書き込みも30秒間隔に抑えています。
-
 ### 補足
 
 - Durable Object Worker は `workers/session-do.js` から `SessionDurableObject` を公開します。
