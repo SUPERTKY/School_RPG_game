@@ -377,9 +377,15 @@ const forwardToDurableObject = async (request, env = {}) => {
 };
 
 export async function onRequestGet({ request, env }) {
-  const durableObjectResponse = await forwardToDurableObject(request, env);
-  if (durableObjectResponse) {
-    return durableObjectResponse;
+  try {
+    const durableObjectResponse = await forwardToDurableObject(request, env);
+    if (durableObjectResponse) {
+      return durableObjectResponse;
+    }
+  } catch {
+    // Keep the session endpoint available if the Durable Object binding is
+    // temporarily unavailable or misconfigured; readSession can still serve the
+    // KV or in-memory fallback instead of surfacing a 500 to clients.
   }
   return json(await readSession(env));
 }
