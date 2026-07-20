@@ -63,6 +63,13 @@ Cloudflare KV は高速な読み取り向けの仕組みで、リアルタイム
 4. Preview URL を見ている場合は Preview 側、独自ドメインや本番 URL を見ている場合は Production 側の設定を確認します。
 5. `readWriteError` が Cloudflare 側のエラーを示す場合は、数分待って再デプロイ・再診断します。
 
+
+### KV の無料枠を超えた場合
+
+`readWriteError` に `KV put() limit exceeded for the day.` と出た場合は、Cloudflare Workers KV の1日あたりの書き込み回数を使い切っています。この状態では、その日の上限がリセットされるまで KV への追加書き込みは失敗します。対処として、リセットを待つ、Workers Paid plan へ変更する、またはリアルタイム同期を Durable Objects など KV 以外へ移行してください。
+
+このアプリでは無料枠を消費しにくくするため、参加待機中の再ポーリングと対戦中の通常同期では不要な KV 書き込みを避け、対戦中の heartbeat 書き込みも30秒間隔に抑えています。
+
 ### 補足
 
 - KV の「エントリー」は手動で作らなくて大丈夫です。管理者画面で「実施する」を押すと、アプリが自動で `current` というエントリーを作成・更新します。
