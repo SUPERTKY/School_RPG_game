@@ -35,16 +35,31 @@
    npx wrangler deploy -c wrangler.session-do.toml
    ```
 
-2. Cloudflare ダッシュボードで、この Pages プロジェクトを開きます。
-3. **Settings** → **Bindings** → **Add** → **Durable Object** を開きます。
-4. Durable Object binding を次のように設定します。
+2. Pages には `GAME_SESSION_DO` binding を設定します。`school-rpg-session-do` という名前である必要はありませんが、**Pages 側で選ぶ Worker / script 名は、1でデプロイした Durable Object Worker の `name` と同じ**にしてください。このリポジトリの設定例では `wrangler.session-do.toml` の `name = "school-rpg-session-do"` に合わせています。
    - **変数名**: `GAME_SESSION_DO`
-   - **Durable Object namespace**: `school-rpg-session-do` の `MyDurableObject`
-     - 既に `SessionDurableObject` で作成済みの場合も動くように、Worker は両方のクラス名を公開しています。
-5. **Settings** → **Environment variables** で次の値を設定します。
+   - **Worker / script**: 1でデプロイした Durable Object Worker 名（例: `school-rpg-session-do`。名前を変えた場合はその名前）
+   - **Durable Object class / entrypoint**: `MyDurableObject`
+   - `hello-world-do-template` など、別のテンプレート Worker を選ぶと、今回のように `Handler does not export a fetch() function.` になります。これは Durable Object のデータが壊れたのではなく、Pages が「このアプリ用の fetch() を持つ Durable Object クラス」ではないものへ接続している状態です。
+   - Cloudflare の Durable Object テンプレートには `sayHello()` だけを持つ RPC 型の例があります。このアプリは `/api/session` のリクエストを Durable Object の `fetch()` に転送する作りなので、`sayHello()` テンプレートの Worker ではなく、このリポジトリの `workers/session-do.js` をデプロイした Worker を選んでください。
+3. **Settings** → **Environment variables** で次の値を設定します。
    - `PASSWORD`: 参加者が学習クイズ画面へ入るためのパスワード
    - `ADMIN_PASSWORD`: 管理者画面と実施状態の更新に使うパスワード
-6. Pages プロジェクトをデプロイし直します。
+4. Pages プロジェクトをデプロイし直します。
+
+
+### Cloudflare ダッシュボードで選び直す手順
+
+1. Cloudflare にログインし、**Workers & Pages** を開きます。
+2. このゲームを公開している **Pages プロジェクト** を開きます。
+3. **Settings** → **Bindings** を開きます。
+4. 既に `GAME_SESSION_DO` がある場合は、その Durable Object binding を編集します。間違っているか分からない場合は、一度削除して作り直しても構いません。
+5. Durable Object binding を次の内容にします。
+   - **Variable name**: `GAME_SESSION_DO`
+   - **Worker / script**: `wrangler.session-do.toml` の `name` と同じ Worker 名（このリポジトリの例では `school-rpg-session-do`）
+   - **Class / entrypoint**: `MyDurableObject`
+6. `hello-world-do-template` や、`sayHello()` だけのテンプレート Worker は選ばないでください。
+7. 保存したら、Pages プロジェクトをもう一度デプロイします。設定を保存しただけでは、今動いている Pages に反映されないことがあります。
+8. もう一度 `/api/session` の診断、または管理画面の「KVデバッグ」を確認します。`GAME_SESSION_DO_ENTRYPOINT_MISSING_FETCH` が消えていれば、接続先の選び直しは成功です。
 
 ### KV をフォールバックとして使う場合
 
@@ -59,12 +74,13 @@ KV を使う場合は **Settings** → **Functions** → **KV namespace bindings
 - `activeBinding: "GAME_SESSION_DURABLE_STORAGE"` の場合は Durable Object 内部ストレージで読み書きできています。
 - `activeBinding: "GAME_SESSION_KV"` または `"GAME_SESSION"` の場合は KV フォールバックで動いています。
 - `GAME_SESSION_STORE_NOT_CONFIGURED` の場合は `GAME_SESSION_DO` または `GAME_SESSION_KV` の binding が Pages に設定されていません。
+- `GAME_SESSION_DO_ENTRYPOINT_MISSING_FETCH` の場合は、Pages から Durable Object は見えていますが、接続先の Worker / class がこのアプリ用ではありません。貼り付けたコードのように `sayHello()` だけがあるテンプレート Worker を選んでいる場合もこの状態になります。Pages の Durable Object binding で、1でデプロイした Worker 名と `MyDurableObject` class を選び直してから Pages を再デプロイしてください。
 - `readWriteOk: false` の場合は、対象 binding の選択、Production / Preview の環境差、設定保存後の再デプロイを確認してください。
 
 ### 補足
 
-- Durable Object Worker は `workers/session-do.js` から `MyDurableObject` と互換用の `SessionDurableObject` を公開します。
-- Durable Object Worker の設定例は `wrangler.session-do.toml` にあります。
+- Durable Object Worker は `workers/session-do.js` から `MyDurableObject` と互換用の `SessionDurableObject` を公開します。Pages の binding は基本的に `MyDurableObject` を指定してください。
+- Durable Object Worker の設定例は `wrangler.session-do.toml` にあります。Pages 側の binding 例は `wrangler.toml` にあります。Worker 名を変える場合は、両方のファイルと Cloudflare Pages の binding を同じ名前にそろえてください。
 - 参加受付、試合状態、生存確認は Durable Object 内部ストレージに保存されます。
 - KV フォールバック時のみ、学習中の生存確認は `match:<試合ID>:seen:<参加者ID>` という KV エントリーに保存されます。このエントリーは1時間後に自動削除されます。
 - すでに増えてしまった古い KV heartbeat は、必要なときだけ `/api/session` に `{"action":"cleanupMatchHeartbeats","adminPassword":"管理者パスワード","limit":100}` を POST して少しずつ削除してください。返却された `cleanupComplete` が `false` の場合は、`cleanupCursor` を次のリクエストに含めて繰り返します。

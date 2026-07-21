@@ -668,10 +668,36 @@ const serializeDiagnosticError = (error) =>
       }
     : undefined;
 
+const durableObjectFetchMissingMessage = "Handler does not export a fetch() function.";
+
+const isDurableObjectFetchMissingError = (error) =>
+  typeof error?.message === "string" && error.message.includes(durableObjectFetchMissingMessage);
+
+const getDurableObjectForwardRecommendation = (error) => {
+  if (isDurableObjectFetchMissingError(error)) {
+    return {
+      code: "GAME_SESSION_DO_ENTRYPOINT_MISSING_FETCH",
+      message:
+        "Pages can see GAME_SESSION_DO, but it is connected to a Durable Object Worker/class that does not provide this app's fetch() handler.",
+      fix:
+        "If the Durable Object code only has an RPC method such as sayHello(), deploy this repository's workers/session-do.js Durable Object Worker, then select that Worker/script and MyDurableObject in the Pages binding and redeploy Pages.",
+    };
+  }
+  if (error) {
+    return {
+      code: durableObjectForwardErrorCode,
+      message: "Pages could not forward /api/session to the configured Durable Object.",
+      fix: "Check that the GAME_SESSION_DO binding is attached to the correct environment, then redeploy Pages.",
+    };
+  }
+  return undefined;
+};
+
 const getSessionStoreDiagnostic = async (env = {}, { durableObjectForwardError } = {}) => {
   const durableObjectNamespaceConfigured = env[durableObjectBindingName] !== undefined && env[durableObjectBindingName] !== null;
   const durableObjectStorageConfigured = env[durableObjectStorageBindingName] !== undefined && env[durableObjectStorageBindingName] !== null;
   const durableObjectForwardErrorDetail = serializeDiagnosticError(durableObjectForwardError);
+  const durableObjectForwardRecommendation = getDurableObjectForwardRecommendation(durableObjectForwardError);
   const bindings = {
     [durableObjectBindingName]: {
       configured: durableObjectNamespaceConfigured,
@@ -704,14 +730,16 @@ const getSessionStoreDiagnostic = async (env = {}, { durableObjectForwardError }
       ok: false,
       error: getPublicErrorCode(error),
       bindings,
+      durableObjectForwardRecommendation,
       consistencyWarning: durableObjectStorageConfigured ? durableObjectConsistencyMessage : kvRealtimeConsistencyWarning,
     };
   }
   if (stores.length === 0) {
     return {
       ok: false,
-      error: durableObjectForwardErrorDetail ? durableObjectForwardErrorCode : "GAME_SESSION_STORE_NOT_CONFIGURED",
+      error: durableObjectForwardRecommendation?.code ?? (durableObjectForwardErrorDetail ? durableObjectForwardErrorCode : "GAME_SESSION_STORE_NOT_CONFIGURED"),
       bindings,
+      durableObjectForwardRecommendation,
       consistencyWarning: kvRealtimeConsistencyWarning,
     };
   }
