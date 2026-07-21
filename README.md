@@ -33,7 +33,7 @@
 
 1. Pages の `wrangler.toml` には次の binding を入れています。Cloudflare側の手動設定も同じ名前にしてください。
    - **変数名**: `GAME_SESSION_DO`
-   - **Worker / script**: `school-rpg-session-do`
+   - **Worker / script**: `study-quiz-session-do`
    - **Durable Object class / entrypoint**: `MyDurableObject`
 2. CloudflareのWeb画面で確認する場合は、Pagesプロジェクトの **Settings** → **Bindings** で `GAME_SESSION_DO` が上記のWorkerとclassを指しているか確認してください。
 3. **Settings** → **Environment variables** で次の値を設定します。
