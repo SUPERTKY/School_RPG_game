@@ -29,22 +29,19 @@
 
 ### Cloudflare Pages で必要な設定
 
-1. `wrangler.session-do.toml` を使って Durable Object Worker をデプロイします。
+既にCloudflare側で Durable Object Worker と Pages binding がそろっている場合は、追加で `npx wrangler deploy` を実行する必要はありません。Pages の Git 連携デプロイが `wrangler.toml` の `GAME_SESSION_DO` binding を読んで、既存の `school-rpg-session-do` Worker に接続します。
 
-   ```bash
-   npx wrangler deploy -c wrangler.session-do.toml
-   ```
-
-2. Pages の Git 連携デプロイは Durable Object Worker を自動作成しないため、`wrangler.toml` には `GAME_SESSION_DO` binding を書きません。先に Worker をデプロイしてから、Cloudflare ダッシュボードで Pages の binding を手動追加してください。
+1. Pages の `wrangler.toml` には次の binding を入れています。Cloudflare側の手動設定も同じ名前にしてください。
    - **変数名**: `GAME_SESSION_DO`
    - **Worker / script**: `study-quiz-session-do`
    - **Durable Object class / entrypoint**: `MyDurableObject`
-   - Worker を未デプロイのまま `wrangler.toml` に `script_name` を書くと、`Script study-quiz-session-do not found` で Pages の Functions 公開が失敗します。
-   - `hello-world-do-template` などのテンプレート Worker を選ぶと、今回のように `Handler does not export a fetch() function.` になります。これは Durable Object のデータが壊れたのではなく、Pages が「このアプリ用の fetch() を持つ Durable Object クラス」ではないものへ接続している状態です。
+2. CloudflareのWeb画面で確認する場合は、Pagesプロジェクトの **Settings** → **Bindings** で `GAME_SESSION_DO` が上記のWorkerとclassを指しているか確認してください。
 3. **Settings** → **Environment variables** で次の値を設定します。
    - `PASSWORD`: 参加者が学習クイズ画面へ入るためのパスワード
    - `ADMIN_PASSWORD`: 管理者画面と実施状態の更新に使うパスワード
 4. Pages プロジェクトをデプロイし直します。
+
+`Script school-rpg-session-do not found` が出る場合は、Cloudflare Workers側に `school-rpg-session-do` が存在しない、またはPagesとWorkerのアカウント/環境が違う状態です。Web画面で Workers & Pages の一覧を開き、`school-rpg-session-do` があるか確認してください。
 
 ### KV をフォールバックとして使う場合
 
