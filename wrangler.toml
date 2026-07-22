@@ -1,4 +1,4 @@
-name = "study-quiz-pages"
+name = "study-quiz"
 pages_build_output_dir = "."
 compatibility_date = "2026-07-20"
 
@@ -9,4 +9,4 @@ compatibility_date = "2026-07-20"
 [[durable_objects.bindings]]
 name = "GAME_SESSION_DO"
 class_name = "MyDurableObject"
-script_name = "study-quiz-session-do"
+script_name = "study-quiz"
